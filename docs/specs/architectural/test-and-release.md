@@ -27,8 +27,7 @@ Governs how the agent and plugins are tested, how a release is cut, and what art
 
 ## Requirements
 
-- `fixtures-from-real-transcripts`(built): Parser fixtures are real harness transcripts passed through a checked-in anonymizer that replaces emails, paths, repository names, and all message content with placeholders while preserving ids, usage blocks, timestamps, branches, and pull-request link lines.
-  - status-reason: the allowlisting anonymizer (cmd/anonymize-transcript) is built and tested; committing an anonymized real transcript awaits the owner's approval, so the only fixture today is synthetic
+- `fixtures-from-real-transcripts`(tested): Parser fixtures are real harness transcripts passed through a checked-in anonymizer that replaces emails, paths, repository names, and all message content with placeholders while preserving ids, usage blocks, timestamps, branches, and pull-request link lines.
 - `fixture-pairs-expected-stream`(tested): Every fixture transcript is paired with the expected event stream it must produce, and the parser test compares the two exactly.
 - `fixture-per-harness-version`(tested): Each supported harness version has at least one fixture.
 - `unit-coverage`(tested): The parser, repository normalization, queue, backoff, and allowlist each have unit tests covering every requirement in their spec that can be exercised without a network.
