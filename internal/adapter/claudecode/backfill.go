@@ -342,7 +342,7 @@ const flushEvery = 256 << 10
 // continues.
 type BackfillStatus struct {
 	StartedAt  time.Time `json:"started_at"`
-	FinishedAt time.Time `json:"finished_at,omitempty"`
+	FinishedAt time.Time `json:"finished_at,omitzero"`
 	Sessions   int       `json:"sessions"`
 	Events     int       `json:"events"`
 	Paused     bool      `json:"paused,omitempty"`
