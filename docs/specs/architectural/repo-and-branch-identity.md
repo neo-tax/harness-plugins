@@ -42,6 +42,7 @@ Branch case is preserved because git branch names are case-sensitive; the server
 ## Risks
 
 - **A repository with no remote.** `repo` is null and sessions cannot be joined to a PR. Accepted; the session still counts toward the device and shows as unmatched.
-- **Host aliases.** A remote written with an SSH `Host` alias (`git@github-work:owner/repo`) or a `url.<base>.insteadOf` prefix (`gh:owner/repo`), or set in an included config file, is parsed as written: the alias is carried as `host` because the agent does not apply SSH or git rewriting. Accepted; `owner` and `name` are still right, and the server can match on them.
+- **Host aliases.** A remote written with an SSH `Host` alias (`git@github-work:owner/repo`) or a `url.<base>.insteadOf` prefix (`gh:owner/repo`) is parsed as written: the alias is carried as `host` because the agent does not apply SSH or git rewriting. Accepted; `owner` and `name` are still right, and the server can match on them.
+- **Remotes defined only in an included config file.** The agent reads the repository's own config and does not follow `include` or `includeIf`, so such a remote is not seen and `repo` falls back to a lower-precedence remote or null. Accepted for v0.1; repository remotes are rarely defined through includes.
 - **A reftable repository with no commits yet.** `branch` is null rather than the branch name, because an unborn HEAD is read from the HEAD file and reftable keeps only a placeholder there. Accepted; the first commit fixes it.
 - **Forks whose `origin` is the fork.** `repo` names the fork, not the upstream the PR targets. Accepted for v0.1; the server can match on `head_sha` and the PR's head repository.
