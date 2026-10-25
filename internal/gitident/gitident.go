@@ -1,8 +1,6 @@
 // Package gitident derives the repo, branch, and head_sha fields of a session
 // event from the working directory a harness reports. The working-directory
 // path itself never leaves this package.
-//
-// @spec: repo-and-branch-identity#cwd-never-sent
 package gitident
 
 import (
@@ -43,6 +41,11 @@ type Identity struct {
 // @spec: repo-and-branch-identity#repo-null-outside-git
 // @spec: repo-and-branch-identity#worktree-resolves-to-main-repo
 func Identify(dir string) Identity {
+	// git -C "" or a relative path would resolve against the agent's own
+	// working directory, not the session's.
+	if !filepath.IsAbs(dir) {
+		return Identity{}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), Timeout)
 	defer cancel()
 	// Output order: git dir, common dir, HEAD's sha, HEAD's symbolic ref. On

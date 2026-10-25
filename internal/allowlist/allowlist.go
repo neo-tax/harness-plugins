@@ -7,6 +7,8 @@
 //
 // @spec: field-allowlist#one-allowlist
 // @spec: field-allowlist#change-updates-this-spec
+// @spec: field-allowlist#cwd-excluded
+// @spec: repo-and-branch-identity#cwd-never-sent
 package allowlist
 
 import (

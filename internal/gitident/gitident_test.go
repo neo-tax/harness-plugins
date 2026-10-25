@@ -136,9 +136,11 @@ func TestDetachedHeadHasNullBranch(t *testing.T) {
 
 // @spec: repo-and-branch-identity#repo-null-outside-git
 func TestOutsideGitIsNull(t *testing.T) {
-	id := gitident.Identify(t.TempDir())
-	if id.Repo != nil || id.Branch != nil || id.HeadSHA != nil {
-		t.Errorf("%+v", id)
+	for _, dir := range []string{t.TempDir(), "", "relative/path"} {
+		id := gitident.Identify(dir)
+		if id.Repo != nil || id.Branch != nil || id.HeadSHA != nil {
+			t.Errorf("%q: %+v", dir, id)
+		}
 	}
 }
 
