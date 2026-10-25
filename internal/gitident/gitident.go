@@ -225,8 +225,7 @@ func unquote(v string) string {
 func ParseRemoteURL(raw string) *contract.Repo {
 	raw = strings.TrimSpace(raw)
 	var host, path string
-	scp := !strings.Contains(raw, "://")
-	if !scp {
+	if strings.Contains(raw, "://") {
 		u, err := url.Parse(raw)
 		if err != nil || u.Scheme == "file" {
 			return nil
@@ -246,10 +245,7 @@ func ParseRemoteURL(raw string) *contract.Repo {
 	}
 	path = strings.TrimSuffix(strings.Trim(path, "/"), ".git")
 	segments := strings.Split(path, "/")
-	// An scp-style host with no dot is most likely an insteadOf alias
-	// (gh:owner/repo); without git's URL rewriting it would yield a wrong
-	// identity, so it yields none.
-	if host == "" || (scp && !strings.Contains(host, ".")) || len(segments) < 2 {
+	if host == "" || len(segments) < 2 {
 		return nil
 	}
 	name := segments[len(segments)-1]
