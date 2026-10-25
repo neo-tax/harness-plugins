@@ -1,0 +1,58 @@
+# harness-plugins
+
+The code that runs on an engineer's machine to observe AI coding sessions and report their metadata to Neo.Tax. One shared agent, one wire contract, a thin adapter per coding harness.
+
+Neo.Tax uses the reported sessions to attribute AI token spend to the pull requests, tickets, and projects it already tracks, so a customer sees per-project AI cost next to engineering effort without anyone tagging anything.
+
+## Status
+
+Design complete, implementation not started. This repository currently holds the glossary and the architectural specs; the agent, contract schemas, adapters, and plugin manifests are built against those specs.
+
+## What ships
+
+| Piece | What it is |
+| --- | --- |
+| `neo-tax-agent` | A static Go binary every adapter execs. Owns the field allowlist, the on-disk queue, flushing to Neo.Tax, enrollment, and transcript backfill. |
+| Wire contract | JSON Schema for every request and response between the agent and Neo.Tax, versioned by `contract_version`. Neo.Tax's server validates against a pinned copy. |
+| Adapters | Per-harness hook registrations and transcript parsing that turn a harness's payloads into normalized session events. Claude Code first; Gemini CLI next; Codex, Cursor, and OpenCode when a customer asks. |
+| Plugins | The installable unit each harness sees, named `neo-tax` on every harness, bundling the agent and one adapter. |
+| Fake ingest server | A stand-in for Neo.Tax that validates the wire contract and records what it receives. Used by tests, dogfooding, and any security team that wants to see exactly what the plugin sends. |
+
+## How it works
+
+1. An admin mints an enrollment token in Neo.Tax. An engineer runs `/neo-tax:login` in their harness, pastes it, and confirms their email. The device receives its own key, scoped to session ingest only.
+2. The harness's lifecycle hooks exec the agent with the hook name on the command line and the harness payload on stdin. The agent reads the session transcript from its last cursor and emits one event per assistant turn: token usage by cache tier, model, repository, branch, and head commit.
+3. Events pass through the allowlist, queue to disk, and flush in batches. Neo.Tax joins each session to a pull request by repository and branch, then to a ticket through its existing PR links, and prices each turn.
+
+No prompt text, completion text, tool inputs, file paths, working-directory paths, or session titles ever leave the machine. The published privacy statement is generated from the allowlist in the agent, so the two cannot drift.
+
+## Reading this repository
+
+- `CONTEXT.md` is the glossary. Its terms are the vocabulary for every spec, commit, and conversation.
+- `docs/specs/architectural/` holds one spec per subsystem: the wire contract, device enrollment, the Claude Code transcript parser, repository and branch identity, the event queue and backfill, the field allowlist, and test and release. Each requirement line carries a status; where code and spec disagree, the code is wrong.
+- `AGENTS.md` is the operating guide for anyone, human or agent, making changes.
+
+## Installing (once released)
+
+Per engineer, from inside Claude Code:
+
+```
+/plugin marketplace add neo-tax/harness-plugins
+/plugin install neo-tax@neo-tax
+/neo-tax:login
+```
+
+Fleet-wide, through managed settings:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "neo-tax": { "source": { "source": "github", "repo": "neo-tax/harness-plugins" } }
+  },
+  "enabledPlugins": { "neo-tax@neo-tax": true }
+}
+```
+
+## Releases
+
+A semantic-version tag builds the agent and the fake ingest server for macOS (arm64, amd64), Linux (amd64, arm64), and Windows (amd64), attaches them to a GitHub release, and the marketplace follows the tag.
