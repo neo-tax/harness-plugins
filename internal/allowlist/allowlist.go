@@ -10,6 +10,7 @@
 package allowlist
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -157,14 +158,14 @@ func filter(in map[string]any, fields []Field, prefix string, dropped *[]string)
 				continue
 			}
 			v = filter(val, f.Children, prefix+k+".", dropped)
-		case []any:
-			report(dropped, prefix, k)
-			continue
-		default:
+		case string, bool, float64, float32, json.Number, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 			if len(f.Children) > 0 {
 				report(dropped, prefix, k)
 				continue
 			}
+		default:
+			report(dropped, prefix, k)
+			continue
 		}
 		out[k] = v
 	}

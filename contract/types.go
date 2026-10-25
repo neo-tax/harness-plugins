@@ -224,30 +224,48 @@ func SchemaFields() map[string][]string {
 }
 
 // ObjectFields returns the sorted property names of the object the session
-// event schema defines under $defs/<name>, looking through a nullable oneOf.
-// It returns nil when no such object is defined.
-func ObjectFields(name string) []string {
+// event schema permits as field on events of kind, following $ref and looking
+// through a nullable oneOf. It returns nil when the field is not an object.
+func ObjectFields(kind, field string) []string {
 	b, err := schemaFS.ReadFile(SessionEventSchema)
 	if err != nil {
 		panic(err)
 	}
-	type object struct {
-		Properties map[string]json.RawMessage `json:"properties"`
-		OneOf      []object                   `json:"oneOf"`
+	type node struct {
+		Ref        string          `json:"$ref"`
+		Const      string          `json:"const"`
+		Properties map[string]node `json:"properties"`
+		OneOf      []node          `json:"oneOf"`
 	}
 	var doc struct {
-		Defs map[string]object `json:"$defs"`
+		node
+		Defs map[string]node `json:"$defs"`
 	}
 	if err := json.Unmarshal(b, &doc); err != nil {
 		panic(err)
 	}
-	def, ok := doc.Defs[name]
+	resolve := func(n node) node {
+		for n.Ref != "" {
+			n = doc.Defs[strings.TrimPrefix(n.Ref, "#/$defs/")]
+		}
+		return n
+	}
+	prop, ok := doc.Properties[field]
+	if !ok {
+		for _, alt := range doc.OneOf {
+			def := resolve(alt)
+			if def.Properties["event_kind"].Const == kind {
+				prop, ok = def.Properties[field]
+			}
+		}
+	}
 	if !ok {
 		return nil
 	}
-	props := def.Properties
-	for _, alt := range def.OneOf {
-		if len(alt.Properties) > 0 {
+	prop = resolve(prop)
+	props := prop.Properties
+	for _, alt := range prop.OneOf {
+		if alt := resolve(alt); len(alt.Properties) > 0 {
 			props = alt.Properties
 		}
 	}

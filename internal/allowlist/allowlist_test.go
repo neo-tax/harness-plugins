@@ -1,6 +1,7 @@
 package allowlist_test
 
 import (
+	"encoding/json"
 	"reflect"
 	"regexp"
 	"sort"
@@ -38,11 +39,11 @@ func TestAllowlistMatchesContract(t *testing.T) {
 			if f.Description == "" {
 				t.Errorf("%s.%s has no description", kind, f.Name)
 			}
-			if (len(f.Children) > 0) != (contract.ObjectFields(f.Name) != nil) {
-				t.Errorf("%s.%s: allowlist children %v, schema object fields %v", kind, f.Name, names(f.Children), contract.ObjectFields(f.Name))
+			if (len(f.Children) > 0) != (contract.ObjectFields(kind, f.Name) != nil) {
+				t.Errorf("%s.%s: allowlist children %v, schema object fields %v", kind, f.Name, names(f.Children), contract.ObjectFields(kind, f.Name))
 			}
 			if len(f.Children) > 0 {
-				if got, want := names(f.Children), contract.ObjectFields(f.Name); !reflect.DeepEqual(got, want) {
+				if got, want := names(f.Children), contract.ObjectFields(kind, f.Name); !reflect.DeepEqual(got, want) {
 					t.Errorf("%s.%s children:\n allowlist %v\n contract  %v", kind, f.Name, got, want)
 				}
 				for _, c := range f.Children {
@@ -180,6 +181,31 @@ func TestDroppedNamesNeverCarryContent(t *testing.T) {
 	})
 	sort.Strings(dropped)
 	if !reflect.DeepEqual(dropped, []string{allowlist.RedactedName, "extra_field"}) {
+		t.Errorf("dropped %v", dropped)
+	}
+}
+
+// Go values an adapter might build directly are held to the same rule: only
+// JSON scalars survive under a leaf field.
+func TestApplyDropsNonScalarGoValuesUnderLeafFields(t *testing.T) {
+	out, dropped, _ := allowlist.Apply(map[string]any{
+		"event_kind": "session.turn",
+		"model":      map[string]string{"cwd": "/Users/alice/acme"},
+		"branch":     []string{"main"},
+		"request_id": "req_1",
+		"message_id": json.Number("1"),
+	})
+	if _, ok := out["model"]; ok {
+		t.Error("model kept")
+	}
+	if _, ok := out["branch"]; ok {
+		t.Error("branch kept")
+	}
+	if out["request_id"] != "req_1" || out["message_id"] != json.Number("1") {
+		t.Errorf("scalars lost: %v", out)
+	}
+	sort.Strings(dropped)
+	if !reflect.DeepEqual(dropped, []string{"branch", "model"}) {
 		t.Errorf("dropped %v", dropped)
 	}
 }
