@@ -56,7 +56,7 @@ Governs how the agent and plugins are tested, how a release is cut, and what art
 
 ## Design Notes
 
-The marketplace's plugin source is a `git-subdir` of this repository at the release tag, so the plugin version an engineer gets is exactly the tagged tree; the plugin's launcher then downloads the agent binary attached to that tag and checks it against the release's `checksums.txt`. From v1.0 a second marketplace under `channels/latest/` points the same plugin at `main`.
+The marketplace's plugin source is a `git-subdir` of this repository at the release tag, so the plugin version an engineer gets is exactly the tagged tree. A release bumps each `plugin.json` on main and pushes the tag; the release workflow checks the manifests against the tag, builds, publishes, and only then pins the stable marketplace on main to the tag, so the marketplace never points at a tag whose binaries are not attached yet; the plugin's launcher then downloads the agent binary attached to that tag and checks it against the release's `checksums.txt`. From v1.0 a second marketplace under `channels/latest/` points the same plugin at `main`.
 
 Fixtures are the contract between the adapter and the harness: when a harness ships a new transcript format, the response is a new anonymized fixture and, only if it fails, a parser change. This keeps harness variability as data rather than code branches.
 

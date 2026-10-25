@@ -23,7 +23,6 @@ jobs:
         with:
           go-version-file: go.mod
       # @spec: test-and-release#manifest-version-matches-tag
-      # @spec: test-and-release#marketplace-source-is-this-repo
       - run: go run ./cmd/release-check "$GITHUB_REF_NAME"
       - run: go test ./...
       - id: v
@@ -153,3 +152,25 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes
+
+  # Only after the release and its binaries exist does the stable marketplace
+  # on main point at the tag, so an install or auto-update never lands on a
+  # tag whose binaries are missing.
+  # @spec: test-and-release#marketplace-source-is-this-repo
+  pin-marketplace:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go run ./cmd/release-check -pin "$GITHUB_REF_NAME"
+      - name: Commit the pinned marketplace to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Pin the marketplace to $GITHUB_REF_NAME"
+          git push origin HEAD:main

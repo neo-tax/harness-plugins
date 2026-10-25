@@ -1,10 +1,13 @@
-// Command release-check fails when any plugin or marketplace manifest
-// disagrees with the release tag.
+// Command release-check fails when the plugin manifests disagree with a
+// release tag, and with -pin points the stable marketplace at the tag after
+// its release is published.
 //
 //	go run ./cmd/release-check v0.1.0
+//	go run ./cmd/release-check -pin v0.1.0
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 
@@ -12,11 +15,20 @@ import (
 )
 
 func main() {
-	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: release-check <tag>")
+	pin := flag.Bool("pin", false, "pin .claude-plugin/marketplace.json to the tag")
+	flag.Parse()
+	if flag.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: release-check [-pin] <tag>")
 		os.Exit(2)
 	}
-	if err := release.Check(".", os.Args[1]); err != nil {
+	tag := flag.Arg(0)
+	if *pin {
+		if err := release.Pin(".", tag); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
+	if err := release.Check(".", tag); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
