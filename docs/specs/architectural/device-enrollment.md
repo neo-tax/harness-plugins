@@ -11,7 +11,7 @@ affects: []
 
 # Device enrollment
 
-Governs how a device obtains its device key: the enrollment token an admin mints, the interactive exchange the engineer runs, where the key is stored, and how the agent behaves when the key is rejected. Identity is captured here and nowhere else (ADR 0002).
+Governs how a device obtains its device key: the enrollment token an admin mints, the interactive exchange the engineer runs, where the key is stored, and how the agent behaves when the key is rejected. Identity is captured here and nowhere else.
 
 ## Requirements
 
@@ -34,6 +34,8 @@ Governs how a device obtains its device key: the enrollment token an admin mints
 - `managed-enrollment-deferred`(approved): Managed delivery of the enrollment token (a file placed by device management or an environment variable, enrolling silently at the first session start with `email_confirmed_by` as `auto` and a random delay before backfill) is not part of v0.1.
 
 ## Design Notes
+
+Harness hook payloads carry no user identity, and the only on-disk sources (git `user.email`, the harness's own account file) are either per-repository or belong to another product. Capturing identity once at enrollment, where the engineer confirms it, and storing it on the device key means every session event afterwards carries only the device id: the hook path never reads identity, no per-session field is personal, and the server resolves device to email to contributor through its existing contributor matcher. A shared or re-imaged machine therefore needs re-enrollment, since a device key is one engineer on one machine. The repository-level git `user.email` is still recorded per session as a secondary, non-identifying join signal for pull-request authorship, because the server's GitHub email mapping already keys on it.
 
 The shape is the Tailscale auth-key model: the circulated secret is short-lived and can only enroll, and the per-laptop secret is minted, not copied, so a leaked enrollment token exposes nothing already enrolled and a lost laptop is revoked alone.
 

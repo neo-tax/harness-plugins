@@ -39,7 +39,9 @@ Governs how the agent and plugins are tested, how a release is cut, and what art
 
 Fixtures are the contract between the adapter and the harness: when a harness ships a new transcript format, the response is a new anonymized fixture and, only if it fails, a parser change. This keeps harness variability as data rather than code branches.
 
-The install smoke test is the only test that exercises the harness's own hook dispatch; everything else stubs the harness by exec'ing the agent directly, which is the boundary ADR 0001 names as what keeps the implementation language reversible.
+The install smoke test is the only test that exercises the harness's own hook dispatch; everything else stubs the harness by exec'ing the agent directly.
+
+The agent is a static Go binary. It ships to every engineer's laptop, often pushed by a customer's IT through device management, so it must run with no runtime present and be small enough to live in every harness's plugin cache: Go cross-compiles to roughly 10 MB static binaries per target with no toolchain work, signs and notarizes cleanly, and is the conventional choice for fleet-deployed agents, which makes it the easiest story for a customer's security review. Nobody on the team has Go experience, so the binary is kept deliberately small (hook glue, transcript parsing, queue, HTTP client). The choice stays cheap to reverse only while two boundaries hold: the wire contract is specified in JSON Schema and never derived from Go types, and the harness boundary is exec-the-binary-with-the-event-on-argv-and-the-payload-on-stdin. With those held, swapping the language is a rewrite of one binary against the existing fixtures, and the end-to-end test above is what proves the boundary is honored.
 
 ## Risks
 
