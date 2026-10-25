@@ -21,6 +21,7 @@ import (
 
 	"github.com/neo-tax/harness-plugins/internal/adapter/claudecode"
 	"github.com/neo-tax/harness-plugins/internal/agent"
+	"github.com/neo-tax/harness-plugins/internal/cursor"
 	"github.com/neo-tax/harness-plugins/internal/enroll"
 )
 
@@ -183,6 +184,14 @@ func backfill(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *background {
+		switch err := claudecode.CheckBackfill(d); {
+		case errors.Is(err, claudecode.ErrBackfillRunning):
+			fmt.Fprintln(stdout, "A backfill is already running.")
+			return 0
+		case err != nil:
+			fmt.Fprintln(stderr, "neo-tax-agent:", err)
+			return 1
+		}
 		if err := startBackfill(d); err != nil {
 			fmt.Fprintln(stderr, "neo-tax-agent: could not start the backfill:", err)
 			return 1
@@ -197,7 +206,14 @@ func backfill(args []string, stdout, stderr io.Writer) int {
 	}
 	if err != nil {
 		// Login runs the backfill detached, with no terminal to report to.
-		agent.Logf(d, "backfill failed: %T", err)
+		reason := "error"
+		switch {
+		case errors.Is(err, claudecode.ErrCannotSend):
+			reason = "device cannot send"
+		case errors.Is(err, cursor.ErrBusy):
+			reason = "cursor lock busy"
+		}
+		agent.Logf(d, "backfill failed: %s", reason)
 		fmt.Fprintln(stderr, "neo-tax-agent:", err)
 		return 1
 	}

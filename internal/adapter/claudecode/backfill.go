@@ -74,7 +74,7 @@ func Backfill(ctx context.Context, o BackfillOptions) error {
 	if o.HTTP == nil {
 		o.HTTP = &http.Client{Timeout: 30 * time.Second}
 	}
-	if err := os.MkdirAll(o.DataDir, 0o700); err != nil {
+	if err := CheckBackfill(o.DataDir); err != nil {
 		return err
 	}
 	lock := flock.New(filepath.Join(o.DataDir, "backfill.lock"))
@@ -91,7 +91,7 @@ func Backfill(ctx context.Context, o BackfillOptions) error {
 	a.Queue.Now = o.Now
 	dev, _ := enroll.Load(o.DataDir)
 	client, err := enroll.Client(o.DataDir, o.HTTP)
-	if err != nil || a.Queue.NeedsEnrollment() {
+	if err != nil {
 		return ErrCannotSend
 	}
 	if o.QueueLimit == 0 {
@@ -102,13 +102,13 @@ func Backfill(ctx context.Context, o BackfillOptions) error {
 		defer cancel()
 		a.Queue.Flush(fctx, client)
 	}
-	status := BackfillStatus{StartedAt: o.Now().UTC()}
-	writeBackfillStatus(o.DataDir, status)
 
 	store := cursor.Open(o.DataDir)
 	if err := withCursorLock(store, store.Reset); err != nil {
 		return err
 	}
+	status := BackfillStatus{StartedAt: o.Now().UTC()}
+	writeBackfillStatus(o.DataDir, status)
 
 	transcripts := mainTranscripts(filepath.Join(o.ConfigDir, "projects"))
 	var sessions, events int
@@ -172,6 +172,29 @@ func ReadBackfillStatus(dataDir string) (BackfillStatus, error) {
 		return s, err
 	}
 	return s, json.Unmarshal(b, &s)
+}
+
+// CheckBackfill reports whether a backfill can run now: the device is
+// enrolled and accepted, and no other backfill holds the lock.
+func CheckBackfill(dataDir string) error {
+	if _, err := enroll.Load(dataDir); err != nil {
+		return ErrCannotSend
+	}
+	if agent.New(dataDir).Queue.NeedsEnrollment() {
+		return ErrCannotSend
+	}
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return err
+	}
+	l := flock.New(filepath.Join(dataDir, "backfill.lock"))
+	ok, err := l.TryLock()
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrBackfillRunning
+	}
+	return l.Unlock()
 }
 
 func withCursorLock(store *cursor.Store, fn func() error) error {

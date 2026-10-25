@@ -354,3 +354,13 @@ func TestBackfillCommand(t *testing.T) {
 		t.Fatalf("recorded %s", k)
 	}
 }
+
+// --background refuses up front, with the reason, when the backfill could
+// not run.
+func TestBackgroundBackfillRefusesBeforeLogin(t *testing.T) {
+	w := newWorld(t)
+	out, code := w.shim("", "backfill", "--background")
+	if code == 0 || !strings.Contains(out, "neo-tax:login") {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+}
