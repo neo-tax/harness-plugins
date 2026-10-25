@@ -168,7 +168,7 @@ func TestSessionLifecycle(t *testing.T) {
 		t.Fatalf("recorded %s", k)
 	}
 	for _, e := range got {
-		if e["device_id"] == "" || e["session_id"] != "fixture-session" {
+		if id, _ := e["device_id"].(string); id == "" || e["session_id"] != "fixture-session" {
 			t.Fatalf("envelope %v", e)
 		}
 	}

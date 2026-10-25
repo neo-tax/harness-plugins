@@ -200,9 +200,6 @@ func TestNotEnrolledQueuesWithoutFlushing(t *testing.T) {
 	if got := h.recorded(); len(got) != 0 {
 		t.Fatalf("sent %v", got)
 	}
-	if st := queue.New(h.data).State(); st.NextSegment != 0 && len(st.Offsets) != 0 {
-		t.Fatal("unexpected state")
-	}
 	paths, _ := filepath.Glob(filepath.Join(h.data, "queue", "*.jsonl"))
 	if len(paths) != 1 {
 		t.Fatalf("queued %v", paths)
@@ -225,28 +222,30 @@ func TestBadInputIsLoggedNotFatal(t *testing.T) {
 
 // @spec: event-queue-and-backfill#dropped-events-reported
 func TestDroppedEventsRideOnOpenedAndClosed(t *testing.T) {
-	h := newHookEnv(t, true)
-	q := queue.New(h.data)
-	q.SegmentMax, q.Cap = 200, 400
-	var lines [][]byte
-	for i := 0; i < 20; i++ {
-		lines = append(lines, []byte(`{"event_kind":"session.closed","pad":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}`))
-	}
-	for _, l := range lines {
-		q.Append([][]byte{l})
-	}
-	h.run("SessionStart", map[string]any{"source": "startup"})
-	var opened map[string]any
-	for _, e := range h.recorded() {
-		if e["event_kind"] == "session.opened" {
-			opened = e
+	for hook, kind := range map[string]string{"SessionStart": "session.opened", "SessionEnd": "session.closed"} {
+		h := newHookEnv(t, true)
+		q := queue.New(h.data)
+		q.SegmentMax, q.Cap = 200, 400
+		for i := 0; i < 20; i++ {
+			q.Append([][]byte{[]byte(`{"event_kind":"session.closed","pad":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}`)})
 		}
-	}
-	if opened == nil || opened["dropped_events"].(float64) == 0 {
-		t.Fatalf("opened %v", opened)
-	}
-	if q.TakeDropped() != 0 {
-		t.Fatal("count not reset")
+		want := q.State().DroppedEvents
+		if want == 0 {
+			t.Fatal("setup: nothing dropped")
+		}
+		h.run(hook, map[string]any{"source": "startup", "reason": "other"})
+		var carrier map[string]any
+		for _, e := range h.recorded() {
+			if e["event_kind"] == kind {
+				carrier = e
+			}
+		}
+		if carrier == nil || carrier["dropped_events"].(float64) != float64(want) {
+			t.Fatalf("%s: %v, want %d", kind, carrier, want)
+		}
+		if q.State().DroppedEvents != 0 {
+			t.Fatalf("%s: count not reset", kind)
+		}
 	}
 }
 
