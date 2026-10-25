@@ -21,8 +21,13 @@ import (
 	"github.com/neo-tax/harness-plugins/internal/gitident"
 )
 
-// ErrBackfillRunning means another backfill holds the backfill lock.
-var ErrBackfillRunning = errors.New("a backfill is already running")
+var (
+	// ErrBackfillRunning means another backfill holds the backfill lock.
+	ErrBackfillRunning = errors.New("a backfill is already running")
+	// ErrCannotSend means the device is not enrolled or needs re-enrollment,
+	// so a backfill would only fill the queue.
+	ErrCannotSend = errors.New("this device cannot send yet; run neo-tax:login first")
+)
 
 // BackfillOptions configures a backfill.
 type BackfillOptions struct {
@@ -32,6 +37,10 @@ type BackfillOptions struct {
 	Now          func() time.Time
 	HTTP         *http.Client
 	Out          io.Writer
+	// QueueLimit pauses the backfill once the queue holds this many bytes
+	// it could not send. Defaults to half the queue cap, so the cap never
+	// evicts the newest sessions a backfill queued first.
+	QueueLimit int64
 }
 
 // ConfigDir is Claude Code's configuration directory: $CLAUDE_CONFIG_DIR, or
@@ -78,22 +87,25 @@ func Backfill(ctx context.Context, o BackfillOptions) error {
 	}
 	defer lock.Unlock()
 
-	store := cursor.Open(o.DataDir)
-	if err := withCursorLock(store, store.Reset); err != nil {
-		return err
-	}
-
 	a := agent.New(o.DataDir)
 	a.Queue.Now = o.Now
 	dev, _ := enroll.Load(o.DataDir)
-	client, clientErr := enroll.Client(o.DataDir, o.HTTP)
+	client, err := enroll.Client(o.DataDir, o.HTTP)
+	if err != nil || a.Queue.NeedsEnrollment() {
+		return ErrCannotSend
+	}
+	if o.QueueLimit == 0 {
+		o.QueueLimit = a.Queue.Cap / 2
+	}
 	flush := func() {
-		if clientErr != nil {
-			return
-		}
 		fctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
 		a.Queue.Flush(fctx, client)
+	}
+
+	store := cursor.Open(o.DataDir)
+	if err := withCursorLock(store, store.Reset); err != nil {
+		return err
 	}
 
 	transcripts := mainTranscripts(filepath.Join(o.ConfigDir, "projects"))
@@ -112,6 +124,10 @@ func Backfill(ctx context.Context, o BackfillOptions) error {
 			events += n
 		}
 		flush()
+		if a.Queue.Size() > o.QueueLimit {
+			fmt.Fprintf(o.Out, "Backfilled %d sessions (%d events), then paused: Neo.Tax is not accepting events right now. Run neo-tax:backfill again later.\n", sessions, events)
+			return nil
+		}
 	}
 	fmt.Fprintf(o.Out, "Backfilled %d sessions (%d events).\n", sessions, events)
 	return nil
@@ -204,7 +220,9 @@ func backfillOne(a *agent.Agent, store *cursor.Store, path, deviceID string, o B
 	err := withCursorLock(store, func() error {
 		res, err := TailEvents(ctx, path, store)
 		if err != nil {
-			return err
+			// Keep what was read; Commit advances only the transcripts that
+			// were read successfully.
+			agent.Logf(o.DataDir, "backfill transcript read failed: %s", errClass(err))
 		}
 		opened := contract.NewOpened(ctx.envelope(start.Version), contract.OpenedFields{
 			StartedAt:    start.Timestamp.UTC(),

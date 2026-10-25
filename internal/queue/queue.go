@@ -191,23 +191,25 @@ func (q *Queue) sealed() []string {
 	return m
 }
 
+// Size is the queue's total size in bytes.
+func (q *Queue) Size() int64 {
+	var total int64
+	entries, _ := os.ReadDir(q.queueDir())
+	for _, e := range entries {
+		if fi, err := e.Info(); err == nil && strings.HasSuffix(e.Name(), ".jsonl") {
+			total += fi.Size()
+		}
+	}
+	return total
+}
+
 // enforceCap deletes the oldest sealed segments while the queue exceeds its
 // cap, counting the unsent events it discards.
 //
 // @spec: event-queue-and-backfill#queue-cap
 // @spec: event-queue-and-backfill#dropped-events-reported
 func (q *Queue) enforceCap(st *State) error {
-	size := func() int64 {
-		var total int64
-		entries, _ := os.ReadDir(q.queueDir())
-		for _, e := range entries {
-			if fi, err := e.Info(); err == nil && strings.HasSuffix(e.Name(), ".jsonl") {
-				total += fi.Size()
-			}
-		}
-		return total
-	}
-	for size() > q.Cap {
+	for q.Size() > q.Cap {
 		segs := q.sealed()
 		if len(segs) == 0 {
 			if err := q.seal(st); err != nil || len(q.sealed()) == 0 {

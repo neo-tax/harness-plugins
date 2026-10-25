@@ -20,6 +20,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/neo-tax/harness-plugins/internal/adapter/claudecode"
+	"github.com/neo-tax/harness-plugins/internal/agent"
 	"github.com/neo-tax/harness-plugins/internal/enroll"
 )
 
@@ -186,6 +187,8 @@ func backfill(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	if err != nil {
+		// Login runs the backfill detached, with no terminal to report to.
+		agent.Logf(d, "backfill failed: %T", err)
 		fmt.Fprintln(stderr, "neo-tax-agent:", err)
 		return 1
 	}

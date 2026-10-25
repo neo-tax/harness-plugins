@@ -134,3 +134,54 @@ func TestHookAfterBackfillSendsOnlyNewTurns(t *testing.T) {
 		t.Fatalf("hook re-sent %d events", got-before)
 	}
 }
+
+// A device that cannot send does not backfill: its queue would fill with
+// history and the cap would evict the newest sessions first.
+func TestBackfillRequiresAnEnrolledDevice(t *testing.T) {
+	h := newHookEnv(t, false)
+	root := projects(t, h.repo)
+	if _, err := h.backfill(root); !errors.Is(err, claudecode.ErrCannotSend) {
+		t.Fatalf("not enrolled: %v", err)
+	}
+	paths, _ := filepath.Glob(filepath.Join(h.data, "queue", "*.jsonl"))
+	if len(paths) != 0 {
+		t.Fatal("queued while unable to send")
+	}
+}
+
+// A backfill that cannot drain stops before the queue nears its cap.
+func TestBackfillStopsWhenQueueBacksUp(t *testing.T) {
+	h := newHookEnv(t, true)
+	root := projects(t, h.repo)
+	http.Post(h.srv.URL+"/_fake/faults", "application/json", strings.NewReader(`{"mode":"server_error","count":100}`))
+	var out bytes.Buffer
+	err := claudecode.Backfill(context.Background(), claudecode.BackfillOptions{
+		DataDir: h.data, ConfigDir: root, AgentVersion: "v", Now: func() time.Time { return h.now },
+		HTTP: &http.Client{Timeout: 5 * time.Second}, Out: &out, QueueLimit: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "paused") || !strings.Contains(out.String(), "1 sessions") {
+		t.Fatalf("output %q", out.String())
+	}
+}
+
+// One unreadable subagent transcript does not cost the session its other
+// events.
+func TestBackfillKeepsSessionWhenASubagentIsUnreadable(t *testing.T) {
+	h := newHookEnv(t, true)
+	root := projects(t, h.repo)
+	bad := filepath.Join(root, "projects", "-some-project", "old-session", "subagents", "agent-bad.jsonl")
+	os.MkdirAll(bad, 0o700) // a directory where a file is expected: reading it fails
+	h.backfill(root)
+	var oldOpened bool
+	for _, e := range h.recorded() {
+		if e["session_id"] == "old-session" && e["event_kind"] == "session.opened" {
+			oldOpened = true
+		}
+	}
+	if !oldOpened {
+		t.Fatal("session skipped")
+	}
+}
