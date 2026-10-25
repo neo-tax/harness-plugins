@@ -227,20 +227,6 @@ func (q *Queue) enforceCap(st *State) error {
 	return nil
 }
 
-// TakeDropped returns the number of events discarded by the cap since the
-// last call, and resets it. The caller carries it on the next
-// session.opened or session.closed event.
-//
-// @spec: event-queue-and-backfill#dropped-events-reported
-func (q *Queue) TakeDropped() int64 {
-	var n int64
-	q.withState(func(st *State) error {
-		n, st.DroppedEvents = st.DroppedEvents, 0
-		return nil
-	})
-	return n
-}
-
 // ConsumeDropped subtracts n from the dropped count once an event carrying
 // n has been queued; drops counted since it was read are kept.
 //

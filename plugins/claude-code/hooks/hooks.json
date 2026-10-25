@@ -7,7 +7,7 @@
             "type": "command",
             "command": "NEO_TAX_DATA_DIR=\"${CLAUDE_PLUGIN_DATA}\" \"${CLAUDE_PLUGIN_ROOT}/bin/neo-tax-agent\" hook SessionStart",
             "async": true,
-            "timeout": 60
+            "timeout": 120
           }
         ]
       }
@@ -19,7 +19,7 @@
             "type": "command",
             "command": "NEO_TAX_DATA_DIR=\"${CLAUDE_PLUGIN_DATA}\" \"${CLAUDE_PLUGIN_ROOT}/bin/neo-tax-agent\" hook Stop",
             "async": true,
-            "timeout": 60
+            "timeout": 120
           }
         ]
       }
@@ -31,7 +31,7 @@
             "type": "command",
             "command": "NEO_TAX_DATA_DIR=\"${CLAUDE_PLUGIN_DATA}\" \"${CLAUDE_PLUGIN_ROOT}/bin/neo-tax-agent\" hook PreCompact",
             "async": true,
-            "timeout": 60
+            "timeout": 120
           }
         ]
       }
@@ -43,7 +43,7 @@
             "type": "command",
             "command": "NEO_TAX_DATA_DIR=\"${CLAUDE_PLUGIN_DATA}\" \"${CLAUDE_PLUGIN_ROOT}/bin/neo-tax-agent\" hook SessionEnd",
             "async": true,
-            "timeout": 60
+            "timeout": 120
           }
         ]
       }

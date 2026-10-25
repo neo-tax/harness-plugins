@@ -42,7 +42,7 @@ if [ ! -x "$bin" ]; then
   mkdir -p "$cache"
   tmp=$(mktemp "$cache/.download.XXXXXX")
   trap 'rm -f "$tmp" "$tmp.sums"' EXIT
-  if ! curl -fsSL --connect-timeout 10 --max-time 20 --retry 1 -o "$tmp" "$base/$asset" || ! curl -fsSL --connect-timeout 10 --max-time 20 --retry 1 -o "$tmp.sums" "$base/checksums.txt"; then
+  if ! curl -fsSL --connect-timeout 10 --max-time 15 -o "$tmp" "$base/$asset" || ! curl -fsSL --connect-timeout 10 --max-time 15 -o "$tmp.sums" "$base/checksums.txt"; then
     echo "neo-tax-agent: could not download $asset for v$version" >&2
     exit 0
   fi
