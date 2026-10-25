@@ -131,7 +131,9 @@ func emit(a *agent.Agent, name string, p payload, o HookOptions) error {
 	var events []any
 	commit := func() error { return nil }
 	// The dropped count rides on opened and closed; it is consumed only once
-	// the event carrying it is queued.
+	// the event carrying it is queued. Reading and consuming it under the
+	// cursor lock, which every hook on this data directory holds here,
+	// keeps two hooks from carrying the same count.
 	dropped := a.Queue.State().DroppedEvents
 	carried := int64(0)
 	switch name {
@@ -168,10 +170,9 @@ func emit(a *agent.Agent, name string, p payload, o HookOptions) error {
 	if err := a.Emit(events...); err != nil {
 		return err
 	}
-	if err := a.Queue.ConsumeDropped(carried); err != nil {
-		return err
-	}
-	return commit()
+	// The cursors move as soon as the events are queued, whatever happens
+	// to the dropped-count bookkeeping.
+	return errors.Join(commit(), a.Queue.ConsumeDropped(carried))
 }
 
 // lastVersion is the last harness version seen in the transcript: from its
