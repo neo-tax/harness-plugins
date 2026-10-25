@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/neo-tax/harness-plugins/internal/adapter/claudecode"
+	"github.com/neo-tax/harness-plugins/internal/cursor"
 	"github.com/neo-tax/harness-plugins/internal/enroll"
 	"github.com/neo-tax/harness-plugins/internal/fakeingest"
 	"github.com/neo-tax/harness-plugins/internal/gitident"
@@ -301,5 +302,24 @@ func TestDroppedCountSurvivesFailedEmit(t *testing.T) {
 	os.Chmod(qdir, 0o700)
 	if got := q.State().DroppedEvents; got != before {
 		t.Fatalf("dropped count %d, want %d", got, before)
+	}
+}
+
+// A busy cursor lock delays the transcript tail but never loses the
+// lifecycle events.
+func TestBusyCursorLockStillEmitsLifecycleEvents(t *testing.T) {
+	h := newHookEnv(t, true)
+	unlock, err := cursor.Open(h.data).Lock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	old := claudecode.CursorWait
+	claudecode.CursorWait = 50 * time.Millisecond
+	defer func() { claudecode.CursorWait = old }()
+	h.run("SessionStart", map[string]any{"source": "startup"})
+	h.run("SessionEnd", map[string]any{"reason": "other"})
+	if k := strings.Join(kinds(h.recorded()), ","); k != "session.opened,session.closed" {
+		t.Fatalf("recorded %s", k)
 	}
 }

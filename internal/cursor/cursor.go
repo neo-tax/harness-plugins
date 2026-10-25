@@ -96,8 +96,11 @@ var ErrBusy = errors.New("cursor: lock held by another invocation")
 
 // Lock waits up to 10 seconds for the cursor lock, which serializes reading
 // transcripts and advancing cursors across concurrent hooks.
-func (s *Store) Lock() (func(), error) {
-	deadline := time.Now().Add(10 * time.Second)
+func (s *Store) Lock() (func(), error) { return s.LockWithin(10 * time.Second) }
+
+// LockWithin waits up to d for the cursor lock.
+func (s *Store) LockWithin(d time.Duration) (func(), error) {
+	deadline := time.Now().Add(d)
 	for {
 		unlock, err := s.TryLock()
 		if !errors.Is(err, ErrBusy) || time.Now().After(deadline) {

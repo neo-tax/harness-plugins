@@ -56,6 +56,7 @@ if [ ! -x "$bin" ]; then
     echo "neo-tax-agent: checksum mismatch for $asset" >&2
     exit 0
   fi
+  rm -f "$tmp.sums"
   chmod 755 "$tmp"
   mv -f "$tmp" "$bin"
 fi

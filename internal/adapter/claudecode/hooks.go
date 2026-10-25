@@ -37,6 +37,9 @@ type payload struct {
 	Reason         string `json:"reason"`
 }
 
+// CursorWait is how long a hook waits for another hook's transcript read.
+var CursorWait = 10 * time.Second
+
 // HookOptions configures one hook invocation.
 type HookOptions struct {
 	DataDir      string
@@ -121,12 +124,17 @@ func emit(a *agent.Agent, name string, p payload, o HookOptions) error {
 	git := gitident.Identify(p.Cwd)
 	ctx := Context{DeviceID: dev.DeviceID, AgentVersion: o.AgentVersion, SessionID: p.SessionID, Now: o.Now(), Git: git}
 
+	// The cursor lock serializes transcript reads and the dropped count.
+	// When another hook holds it too long, the transcript tail waits for the
+	// next hook, but opened and closed are still emitted, carrying no count.
 	store := cursor.Open(o.DataDir)
-	unlock, err := store.Lock()
-	if err != nil {
-		return err
+	unlock, lockErr := store.LockWithin(CursorWait)
+	locked := lockErr == nil
+	if locked {
+		defer unlock()
+	} else {
+		agent.Logf(o.DataDir, "hook=%s cursor lock busy; transcript tail deferred", name)
 	}
-	defer unlock()
 
 	var events []any
 	commit := func() error { return nil }
@@ -134,8 +142,10 @@ func emit(a *agent.Agent, name string, p payload, o HookOptions) error {
 	// the event carrying it is queued. Reading and consuming it under the
 	// cursor lock, which every hook on this data directory holds here,
 	// keeps two hooks from carrying the same count.
-	dropped := a.Queue.State().DroppedEvents
-	carried := int64(0)
+	var dropped, carried int64
+	if locked {
+		dropped = a.Queue.State().DroppedEvents
+	}
 	switch name {
 	case "SessionStart":
 		// @spec: claude-code-transcript-parser#opened-on-session-start
@@ -151,14 +161,16 @@ func emit(a *agent.Agent, name string, p payload, o HookOptions) error {
 		}))
 		carried = dropped
 	case "Stop", "PreCompact", "SessionEnd":
-		res, err := TailEvents(ctx, p.TranscriptPath, store)
-		if err != nil {
-			agent.Logf(o.DataDir, "hook=%s transcript read failed: %s", name, errClass(err))
+		if locked {
+			res, err := TailEvents(ctx, p.TranscriptPath, store)
+			if err != nil {
+				agent.Logf(o.DataDir, "hook=%s transcript read failed: %s", name, errClass(err))
+			}
+			if res.ParseFailures > 0 {
+				agent.Logf(o.DataDir, "hook=%s parse_failures=%d harness_version=%s", name, res.ParseFailures, lastVersion(p.TranscriptPath, store))
+			}
+			events, commit = res.Events, res.Commit
 		}
-		if res.ParseFailures > 0 {
-			agent.Logf(o.DataDir, "hook=%s parse_failures=%d harness_version=%s", name, res.ParseFailures, lastVersion(p.TranscriptPath, store))
-		}
-		events, commit = res.Events, res.Commit
 		if name == "SessionEnd" {
 			// @spec: claude-code-transcript-parser#closed-on-session-end
 			events = append(events, contract.NewClosed(ctx.envelope(lastVersion(p.TranscriptPath, store)), contract.ClosedFields{
