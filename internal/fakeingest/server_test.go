@@ -271,3 +271,13 @@ func TestEventWithUnacceptedContractVersionRejected(t *testing.T) {
 		t.Fatalf("response %+v", ir)
 	}
 }
+
+// @spec: session-event-wire-contract#schema-rejection-is-partial
+func TestNonObjectEventRejectedPerEvent(t *testing.T) {
+	h := start(t, fakeingest.Options{})
+	er := h.enroll()
+	resp, ir, body := h.ingest(er.DeviceKey, turn(er.DeviceID, "m1"), nil)
+	if resp.StatusCode != http.StatusOK || ir.Accepted != 1 || len(ir.Rejected) != 1 || ir.Rejected[0].Index != 1 {
+		t.Fatalf("status %d %+v %s", resp.StatusCode, ir, body)
+	}
+}
