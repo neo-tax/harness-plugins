@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://neo.tax/contract/enrollment.schema.json",
+  "title": "Enrollment",
+  "description": "The one-time exchange in which a device presents an enrollment token and a confirmed email and receives its device key.",
+  "$defs": {
+    "request": {
+      "type": "object",
+      "required": ["contract_version", "enrollment_token", "email", "email_confirmed_by", "device"],
+      "properties": {
+        "contract_version": { "type": "string", "minLength": 1 },
+        "enrollment_token": { "type": "string", "minLength": 1 },
+        "email": { "type": "string", "format": "email" },
+        "email_confirmed_by": { "enum": ["engineer", "auto"] },
+        "device": {
+          "type": "object",
+          "required": ["hostname", "os", "arch", "harness", "harness_version", "agent_version"],
+          "properties": {
+            "hostname": { "type": "string" },
+            "os": { "type": "string", "minLength": 1 },
+            "arch": { "type": "string", "minLength": 1 },
+            "harness": { "type": "string", "minLength": 1 },
+            "harness_version": { "type": ["string", "null"] },
+            "agent_version": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "required": ["device_id", "device_key", "ingest_base_url"],
+      "properties": {
+        "device_id": { "type": "string", "minLength": 1 },
+        "device_key": { "type": "string", "minLength": 1 },
+        "ingest_base_url": { "type": "string", "format": "uri" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://neo.tax/contract/session-event.schema.json",
+  "title": "Session event",
+  "description": "One normalized record the agent emits about a session. Carries the device id and non-personal session metadata only.",
+  "type": "object",
+  "required": ["contract_version", "device_id", "harness", "harness_version", "agent_version", "session_id", "event_kind", "sent_at"],
+  "properties": {
+    "contract_version": { "type": "string", "minLength": 1, "description": "Wire contract version this event conforms to." },
+    "device_id": { "type": "string", "minLength": 1, "description": "Device id minted at enrollment." },
+    "harness": { "type": "string", "minLength": 1, "description": "Harness that ran the session, e.g. claude-code." },
+    "harness_version": { "type": ["string", "null"], "description": "Harness version recorded for the session." },
+    "agent_version": { "type": "string", "minLength": 1, "description": "Version of neo-tax-agent that emitted the event." },
+    "session_id": { "type": "string", "minLength": 1, "description": "The harness's own session id." },
+    "event_kind": { "enum": ["session.opened", "session.turn", "session.pr_opened", "session.closed"] },
+    "sent_at": { "$ref": "#/$defs/timestamp", "description": "When the agent created the event." }
+  },
+  "oneOf": [
+    { "$ref": "#/$defs/opened" },
+    { "$ref": "#/$defs/turn" },
+    { "$ref": "#/$defs/pr_opened" },
+    { "$ref": "#/$defs/closed" }
+  ],
+  "unevaluatedProperties": false,
+  "$defs": {
+    "timestamp": { "type": "string", "format": "date-time" },
+    "nullable_string": { "type": ["string", "null"] },
+    "head_sha": {
+      "type": ["string", "null"],
+      "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$",
+      "description": "Full commit hash HEAD points at."
+    },
+    "count": { "type": ["integer", "null"], "minimum": 0 },
+    "repo": {
+      "description": "Normalized repository identity parsed from a git remote URL, or null.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["host", "owner", "name"],
+          "properties": {
+            "host": { "$ref": "#/$defs/lowercase" },
+            "owner": { "$ref": "#/$defs/lowercase" },
+            "name": { "$ref": "#/$defs/lowercase" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "lowercase": { "type": "string", "minLength": 1, "pattern": "^[^A-Z]+$" },
+    "usage": {
+      "type": "object",
+      "required": ["input", "output", "cache_write_5m", "cache_write_1h", "cache_read", "service_tier", "source"],
+      "properties": {
+        "input": { "$ref": "#/$defs/count" },
+        "output": { "$ref": "#/$defs/count" },
+        "cache_write_5m": { "$ref": "#/$defs/count" },
+        "cache_write_1h": { "$ref": "#/$defs/count" },
+        "cache_read": { "$ref": "#/$defs/count" },
+        "service_tier": { "$ref": "#/$defs/nullable_string" },
+        "source": { "enum": ["payload", "transcript", "unknown"] }
+      },
+      "additionalProperties": false,
+      "if": { "properties": { "source": { "const": "unknown" } } },
+      "then": {
+        "properties": {
+          "input": { "type": "null" },
+          "output": { "type": "null" },
+          "cache_write_5m": { "type": "null" },
+          "cache_write_1h": { "type": "null" },
+          "cache_read": { "type": "null" }
+        }
+      }
+    },
+    "opened": {
+      "type": "object",
+      "required": ["event_kind", "started_at", "entrypoint", "source", "repo", "branch", "head_sha", "git_user_email", "dropped_events"],
+      "properties": {
+        "event_kind": { "const": "session.opened" },
+        "started_at": { "$ref": "#/$defs/timestamp" },
+        "entrypoint": { "$ref": "#/$defs/nullable_string" },
+        "source": { "$ref": "#/$defs/nullable_string" },
+        "repo": { "$ref": "#/$defs/repo" },
+        "branch": { "$ref": "#/$defs/nullable_string" },
+        "head_sha": { "$ref": "#/$defs/head_sha" },
+        "git_user_email": { "$ref": "#/$defs/nullable_string" },
+        "dropped_events": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "turn": {
+      "type": "object",
+      "required": ["event_kind", "message_id", "request_id", "subagent_id", "timestamp", "model", "branch", "head_sha", "usage"],
+      "properties": {
+        "event_kind": { "const": "session.turn" },
+        "message_id": { "type": "string", "minLength": 1 },
+        "request_id": { "$ref": "#/$defs/nullable_string" },
+        "subagent_id": { "type": ["string", "null"], "minLength": 1 },
+        "timestamp": { "$ref": "#/$defs/timestamp" },
+        "model": { "$ref": "#/$defs/nullable_string" },
+        "branch": { "$ref": "#/$defs/nullable_string" },
+        "head_sha": { "$ref": "#/$defs/head_sha" },
+        "usage": { "$ref": "#/$defs/usage" }
+      }
+    },
+    "pr_opened": {
+      "type": "object",
+      "required": ["event_kind", "repo", "number", "timestamp"],
+      "properties": {
+        "event_kind": { "const": "session.pr_opened" },
+        "repo": { "$ref": "#/$defs/repo" },
+        "number": { "type": "integer", "minimum": 1 },
+        "timestamp": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "closed": {
+      "type": "object",
+      "required": ["event_kind", "ended_at", "reason", "dropped_events"],
+      "properties": {
+        "event_kind": { "const": "session.closed" },
+        "ended_at": { "$ref": "#/$defs/timestamp" },
+        "reason": { "$ref": "#/$defs/nullable_string" },
+        "dropped_events": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

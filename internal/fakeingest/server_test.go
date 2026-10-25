@@ -1,0 +1,261 @@
+package fakeingest_test
+
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/neo-tax/harness-plugins/contract"
+	"github.com/neo-tax/harness-plugins/internal/fakeingest"
+)
+
+type harness struct {
+	t   *testing.T
+	srv *httptest.Server
+}
+
+func start(t *testing.T, opts fakeingest.Options) *harness {
+	t.Helper()
+	srv := httptest.NewServer(fakeingest.New(opts))
+	t.Cleanup(srv.Close)
+	return &harness{t: t, srv: srv}
+}
+
+func (h *harness) post(path, key string, body any) (*http.Response, []byte) {
+	h.t.Helper()
+	b, _ := json.Marshal(body)
+	req, _ := http.NewRequest(http.MethodPost, h.srv.URL+path, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	if key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(resp.Body)
+	return resp, out
+}
+
+func (h *harness) enroll() contract.EnrollmentResponse {
+	h.t.Helper()
+	resp, body := h.post("/v1/enroll", "", contract.EnrollmentRequest{
+		ContractVersion: contract.Version, EnrollmentToken: "et_test", Email: "e@example.com",
+		EmailConfirmedBy: contract.EmailConfirmedByEngineer,
+		Device:           contract.DeviceDescription{Hostname: "h", OS: "darwin", Arch: "arm64", Harness: "claude-code", AgentVersion: "0.1.0"},
+	})
+	if resp.StatusCode != http.StatusOK {
+		h.t.Fatalf("enroll: %d %s", resp.StatusCode, body)
+	}
+	if err := contract.ValidateEnrollmentResponse(body); err != nil {
+		h.t.Fatal(err)
+	}
+	var er contract.EnrollmentResponse
+	json.Unmarshal(body, &er)
+	return er
+}
+
+func (h *harness) ingest(key string, events ...any) (*http.Response, contract.IngestResponse, []byte) {
+	h.t.Helper()
+	raw := make([]json.RawMessage, len(events))
+	for i, e := range events {
+		raw[i], _ = json.Marshal(e)
+	}
+	resp, body := h.post("/v1/events", key, contract.IngestRequest{ContractVersion: contract.Version, Events: raw})
+	var ir contract.IngestResponse
+	if resp.StatusCode == http.StatusOK {
+		if err := contract.ValidateIngestResponse(body); err != nil {
+			h.t.Fatalf("response violates contract: %v", err)
+		}
+		json.Unmarshal(body, &ir)
+	}
+	return resp, ir, body
+}
+
+func (h *harness) recorded() []map[string]any {
+	h.t.Helper()
+	resp, err := http.Get(h.srv.URL + "/_fake/events")
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out []map[string]any
+	json.NewDecoder(resp.Body).Decode(&out)
+	return out
+}
+
+func turn(deviceID, msgID string) contract.Turn {
+	s := func(v string) *string { return &v }
+	return contract.NewTurn(contract.Envelope{
+		ContractVersion: contract.Version, DeviceID: deviceID, Harness: "claude-code", HarnessVersion: s("2.1.310"),
+		AgentVersion: "0.1.0", SessionID: "s-1", SentAt: time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC),
+	}, contract.TurnFields{MessageID: msgID, Timestamp: time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC), Usage: contract.UnknownUsage()})
+}
+
+// @spec: session-event-wire-contract#fake-ingest-validates-same-schemas
+// @spec: session-event-wire-contract#ingest-response-per-event
+// @spec: session-event-wire-contract#schema-rejection-is-partial
+func TestIngestAcceptsValidAndRejectsInvalidPerEvent(t *testing.T) {
+	h := start(t, fakeingest.Options{})
+	er := h.enroll()
+	bad := map[string]any{"event_kind": "session.turn", "cwd": "/Users/x"}
+	resp, ir, body := h.ingest(er.DeviceKey, turn(er.DeviceID, "m1"), bad, turn(er.DeviceID, "m2"))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d %s", resp.StatusCode, body)
+	}
+	if ir.Accepted != 2 || ir.Duplicates != 0 || len(ir.Rejected) != 1 || ir.Rejected[0].Index != 1 || ir.Rejected[0].Reason == "" {
+		t.Fatalf("response %+v", ir)
+	}
+	if got := len(h.recorded()); got != 2 {
+		t.Fatalf("recorded %d events", got)
+	}
+}
+
+// @spec: session-event-wire-contract#idempotency-key
+func TestDuplicatesAreCountedNotRecorded(t *testing.T) {
+	h := start(t, fakeingest.Options{})
+	er := h.enroll()
+	h.ingest(er.DeviceKey, turn(er.DeviceID, "m1"))
+	_, ir, _ := h.ingest(er.DeviceKey, turn(er.DeviceID, "m1"), turn(er.DeviceID, "m2"))
+	if ir.Accepted != 1 || ir.Duplicates != 1 {
+		t.Fatalf("response %+v", ir)
+	}
+	if got := len(h.recorded()); got != 2 {
+		t.Fatalf("recorded %d events", got)
+	}
+}
+
+// An event that claims another device's id is rejected: a device key only
+// ingests for its own device.
+func TestEventForAnotherDeviceRejected(t *testing.T) {
+	h := start(t, fakeingest.Options{})
+	er := h.enroll()
+	_, ir, _ := h.ingest(er.DeviceKey, turn("someone-else", "m1"))
+	if ir.Accepted != 0 || len(ir.Rejected) != 1 {
+		t.Fatalf("response %+v", ir)
+	}
+}
+
+// @spec: session-event-wire-contract#contract-version-on-every-request
+func TestUnsupportedContractVersionNamesAcceptedVersions(t *testing.T) {
+	h := start(t, fakeingest.Options{})
+	er := h.enroll()
+	raw, _ := json.Marshal(turn(er.DeviceID, "m1"))
+	resp, body := h.post("/v1/events", er.DeviceKey, contract.IngestRequest{ContractVersion: "999", Events: []json.RawMessage{raw}})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	if err := contract.ValidateIngestError(body); err != nil {
+		t.Fatal(err)
+	}
+	var e contract.ErrorResponse
+	json.Unmarshal(body, &e)
+	if len(e.AcceptedVersions) == 0 || e.AcceptedVersions[0] != contract.Version {
+		t.Fatalf("accepted versions %v", e.AcceptedVersions)
+	}
+}
+
+// @spec: session-event-wire-contract#auth-errors-are-distinct
+func TestAuthAndSchemaFailuresHaveDistinctStatuses(t *testing.T) {
+	h := start(t, fakeingest.Options{})
+	er := h.enroll()
+
+	if resp, _, _ := h.ingest("not-a-key", turn(er.DeviceID, "m1")); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("unknown key: %d", resp.StatusCode)
+	}
+	if resp, _ := h.post("/v1/events", er.DeviceKey, map[string]any{"contract_version": contract.Version, "events": []any{}}); resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("empty batch: %d", resp.StatusCode)
+	}
+	h.post("/_fake/devices/"+er.DeviceID+"/forbid", "", nil)
+	if resp, _, _ := h.ingest(er.DeviceKey, turn(er.DeviceID, "m1")); resp.StatusCode != http.StatusForbidden {
+		t.Errorf("forbidden device: %d", resp.StatusCode)
+	}
+	h.post("/_fake/devices/"+er.DeviceID+"/revoke", "", nil)
+	if resp, _, _ := h.ingest(er.DeviceKey, turn(er.DeviceID, "m1")); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("revoked key: %d", resp.StatusCode)
+	}
+}
+
+func TestEnrollmentValidatesRequestAndToken(t *testing.T) {
+	h := start(t, fakeingest.Options{EnrollmentTokens: []string{"et_good"}})
+	resp, _ := h.post("/v1/enroll", "", map[string]any{"contract_version": contract.Version})
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("invalid request: %d", resp.StatusCode)
+	}
+	req := contract.EnrollmentRequest{
+		ContractVersion: contract.Version, EnrollmentToken: "et_bad", Email: "e@example.com", EmailConfirmedBy: "engineer",
+		Device: contract.DeviceDescription{Hostname: "h", OS: "o", Arch: "a", Harness: "claude-code", AgentVersion: "v"},
+	}
+	if resp, _ := h.post("/v1/enroll", "", req); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("unknown token: %d", resp.StatusCode)
+	}
+	req.EnrollmentToken = "et_good"
+	if resp, body := h.post("/v1/enroll", "", req); resp.StatusCode != http.StatusOK {
+		t.Errorf("good token: %d %s", resp.StatusCode, body)
+	}
+}
+
+// Re-enrolling the same device yields a fresh key; the enrolled email is
+// visible to whoever runs the fake so a security reviewer can see it.
+func TestEnrollmentsAreListed(t *testing.T) {
+	h := start(t, fakeingest.Options{})
+	a, b := h.enroll(), h.enroll()
+	if a.DeviceKey == b.DeviceKey || a.DeviceID == b.DeviceID {
+		t.Fatal("enrollments must mint distinct devices and keys")
+	}
+	resp, _ := http.Get(h.srv.URL + "/_fake/enrollments")
+	var list []map[string]any
+	json.NewDecoder(resp.Body).Decode(&list)
+	if len(list) != 2 || list[0]["email"] != "e@example.com" {
+		t.Fatalf("enrollments %v", list)
+	}
+}
+
+// @spec: test-and-release#fake-ingest-fault-modes
+func TestFaultModes(t *testing.T) {
+	cases := map[string]int{
+		"unauthorized": http.StatusUnauthorized,
+		"forbidden":    http.StatusForbidden,
+		"server_error": http.StatusInternalServerError,
+	}
+	for mode, status := range cases {
+		h := start(t, fakeingest.Options{})
+		er := h.enroll()
+		h.post("/_fake/faults", "", map[string]any{"mode": mode, "count": 1})
+		if resp, _, _ := h.ingest(er.DeviceKey, turn(er.DeviceID, "m1")); resp.StatusCode != status {
+			t.Errorf("%s: status %d", mode, resp.StatusCode)
+		}
+		if resp, _, _ := h.ingest(er.DeviceKey, turn(er.DeviceID, "m1")); resp.StatusCode != http.StatusOK {
+			t.Errorf("%s: fault did not clear after count, status %d", mode, resp.StatusCode)
+		}
+	}
+
+	h := start(t, fakeingest.Options{})
+	er := h.enroll()
+	h.post("/_fake/faults", "", map[string]any{"mode": "schema", "count": 1})
+	_, ir, _ := h.ingest(er.DeviceKey, turn(er.DeviceID, "m1"), turn(er.DeviceID, "m2"))
+	if ir.Accepted != 0 || len(ir.Rejected) != 2 {
+		t.Errorf("schema fault: %+v", ir)
+	}
+
+	h = start(t, fakeingest.Options{StallFor: 200 * time.Millisecond})
+	er = h.enroll()
+	h.post("/_fake/faults", "", map[string]any{"mode": "stall", "count": 1})
+	began := time.Now()
+	h.ingest(er.DeviceKey, turn(er.DeviceID, "m1"))
+	if time.Since(began) < 200*time.Millisecond {
+		t.Errorf("stall returned after %s", time.Since(began))
+	}
+}
+
+func TestUnknownFaultModeRejected(t *testing.T) {
+	h := start(t, fakeingest.Options{})
+	if resp, _ := h.post("/_fake/faults", "", map[string]any{"mode": "explode"}); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+}
