@@ -5,7 +5,7 @@ owner:
   - Firas Abuzaid
 created: 2026-10-24
 updated: 2026-10-25
-version: 1
+version: 2
 affects:
   - internal/fakeingest/*.go
   - .github/workflows/ci.yml
@@ -43,7 +43,7 @@ Governs how the agent and plugins are tested, how a release is cut, and what art
   - status-reason: the release workflow's build matrix; CI cross-compiles the same five targets on every push
 - `release-attaches-binaries`(built): Release binaries and the fake ingest server for the same targets are attached to a GitHub release for the tag.
   - status-reason: the release workflow's publish job; exercised by the first release
-- `manifest-version-matches-tag`(tested): The release workflow fails if any plugin or marketplace manifest's version differs from the tag.
+- `manifest-version-matches-tag`(tested): The release workflow fails if any plugin manifest's version, or the latest channel marketplace's version, differs from the tag; the stable marketplace's version is set to the tag when the marketplace is pinned after publish.
 - `marketplace-source-is-this-repo`(tested): The marketplace manifest's source for each plugin is this repository at the released tag, so a harness's plugin auto-update follows releases.
 - `single-channel-v0-1`(tested): v0.1 publishes one marketplace that tracks the latest release.
 - `unsigned-binaries-v0-1`(built): v0.1 binaries are unsigned.

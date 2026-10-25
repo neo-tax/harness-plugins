@@ -139,3 +139,32 @@ func TestRepositoryManifests(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Pin never moves the marketplace to an older release, and changes nothing
+// but version and ref values.
+func TestPinIsForwardOnlyAndKeepsLayout(t *testing.T) {
+	root := repo(t, layout{version: "0.2.0"})
+	path := filepath.Join(root, ".claude-plugin/marketplace.json")
+	before, _ := os.ReadFile(path)
+	if err := release.Pin(root, "v0.0.8"); err == nil || !strings.Contains(err.Error(), "older") {
+		t.Fatalf("pinned backwards: %v", err)
+	}
+	if err := release.Pin(root, "v0.2.0"); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(path)
+	want := strings.NewReplacer(`"0.0.9"`, `"0.2.0"`, `"v0.0.9"`, `"v0.2.0"`).Replace(string(before))
+	if strings.TrimSpace(string(after)) != strings.TrimSpace(want) {
+		t.Fatalf("layout changed:\n%s\nwant\n%s", after, want)
+	}
+	if err := release.Pin(root, "v0.2.0"); err != nil {
+		t.Fatalf("re-pin: %v", err)
+	}
+}
+
+func TestLatestChannelVersionsMustMatch(t *testing.T) {
+	root := repo(t, layout{version: "1.0.0", latestBytes: `{"name":"neo-tax-latest","metadata":{"version":"0.9.0"},"plugins":[{"name":"neo-tax","version":"0.9.0","source":{"source":"git-subdir","url":"neo-tax/harness-plugins","path":"plugins/claude-code","ref":"main"}}]}`})
+	if err := release.Check(root, "v1.0.0"); err == nil || !strings.Contains(err.Error(), "latest channel") {
+		t.Fatalf("err %v", err)
+	}
+}

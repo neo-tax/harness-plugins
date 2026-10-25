@@ -159,6 +159,12 @@ jobs:
   # @spec: test-and-release#marketplace-source-is-this-repo
   pin-marketplace:
     needs: publish
+    # publish runs after skipped v0 signing jobs; without an explicit
+    # condition this job would inherit their skip.
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
+    concurrency:
+      group: pin-marketplace
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -172,5 +178,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git diff --quiet && exit 0
           git commit -am "Pin the marketplace to $GITHUB_REF_NAME"
+          git pull --rebase origin main
           git push origin HEAD:main

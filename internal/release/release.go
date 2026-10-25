@@ -89,7 +89,7 @@ func Check(root, tag string) error {
 	if err != nil {
 		return err
 	}
-	errs := checkMarketplace(root, "marketplace", stable, version, "")
+	errs := checkMarketplace(root, "marketplace", stable, version, "", false)
 
 	latest, err := read(filepath.Join(root, latestPath))
 	switch {
@@ -102,19 +102,26 @@ func Check(root, tag string) error {
 	case major == 0:
 		errs = append(errs, fmt.Errorf("v0 publishes a single channel; remove %s", latestPath))
 	default:
-		errs = append(errs, checkMarketplace(root, "latest channel", latest, version, "main")...)
+		errs = append(errs, checkMarketplace(root, "latest channel", latest, version, "main", true)...)
 	}
 	return errors.Join(errs...)
 }
 
 // checkMarketplace checks a marketplace's plugin sources; ref, when set, is
-// the ref each source must name.
-func checkMarketplace(root, label string, m manifest, version, ref string) []error {
+// the ref each source must name, and versions says whether the marketplace's
+// own versions must already match (the stable one's are set by Pin).
+func checkMarketplace(root, label string, m manifest, version, ref string, versions bool) []error {
 	var errs []error
 	if len(m.Plugins) == 0 {
 		errs = append(errs, fmt.Errorf("%s lists no plugins", label))
 	}
+	if versions && m.Metadata.Version != version {
+		errs = append(errs, fmt.Errorf("%s metadata version %q, want %q", label, m.Metadata.Version, version))
+	}
 	for _, p := range m.Plugins {
+		if versions && p.Version != version {
+			errs = append(errs, fmt.Errorf("%s plugin %s version %q, want %q", label, p.Name, p.Version, version))
+		}
 		s := p.Source
 		if s.Source != "git-subdir" || s.URL != Repository || s.Path == "" {
 			errs = append(errs, fmt.Errorf("%s plugin %s source must be git-subdir of %s", label, p.Name, Repository))
@@ -136,7 +143,8 @@ func checkMarketplace(root, label string, m manifest, version, ref string) []err
 }
 
 // Pin points the stable marketplace at tag: its version, each plugin's
-// version, and each plugin source's ref. Every other field is kept.
+// version, and each plugin source's ref. It edits only those values, keeping
+// the file's layout, and refuses a tag older than the one already pinned.
 //
 // @spec: test-and-release#marketplace-source-is-this-repo
 func Pin(root, tag string) error {
@@ -145,34 +153,54 @@ func Pin(root, tag string) error {
 		return err
 	}
 	path := filepath.Join(root, stablePath)
+	current, err := read(path)
+	if err != nil {
+		return err
+	}
+	for _, p := range current.Plugins {
+		if p.Source.Ref != "" && semver.MatchString(p.Source.Ref) && older(tag, p.Source.Ref) {
+			return fmt.Errorf("%s is older than the pinned %s; refusing to move the marketplace back", tag, p.Source.Ref)
+		}
+	}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	var m map[string]any
-	if err := json.Unmarshal(b, &m); err != nil {
-		return fmt.Errorf("%s: %w", path, err)
+	b = versionField.ReplaceAll(b, []byte(`${1}"`+version+`"`))
+	b = refField.ReplaceAll(b, []byte(`${1}"`+tag+`"`))
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		return err
 	}
-	meta, _ := m["metadata"].(map[string]any)
-	if meta == nil {
-		meta = map[string]any{}
-		m["metadata"] = meta
-	}
-	meta["version"] = version
-	plugins, _ := m["plugins"].([]any)
-	for _, p := range plugins {
-		pm, ok := p.(map[string]any)
-		if !ok {
-			continue
-		}
-		pm["version"] = version
-		if src, ok := pm["source"].(map[string]any); ok {
-			src["ref"] = tag
-		}
-	}
-	out, err := json.MarshalIndent(m, "", "  ")
+	// Confirm the targeted edit landed where it should.
+	pinned, err := read(path)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(out, '\n'), 0o644)
+	if pinned.Metadata.Version != version {
+		return fmt.Errorf("%s: metadata version not pinned", path)
+	}
+	for _, p := range pinned.Plugins {
+		if p.Version != version || p.Source.Ref != tag {
+			return fmt.Errorf("%s: plugin %s not pinned", path, p.Name)
+		}
+	}
+	return nil
+}
+
+var (
+	versionField = regexp.MustCompile(`("version"\s*:\s*)"[^"]*"`)
+	refField     = regexp.MustCompile(`("ref"\s*:\s*)"[^"]*"`)
+)
+
+// older reports whether semver tag a precedes b.
+func older(a, b string) bool {
+	pa, pb := semver.FindStringSubmatch(a), semver.FindStringSubmatch(b)
+	for i := 1; i <= 3; i++ {
+		x, _ := strconv.Atoi(pa[i])
+		y, _ := strconv.Atoi(pb[i])
+		if x != y {
+			return x < y
+		}
+	}
+	return false
 }
