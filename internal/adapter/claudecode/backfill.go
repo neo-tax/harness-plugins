@@ -90,14 +90,21 @@ func Backfill(ctx context.Context, o BackfillOptions) error {
 	a := agent.New(o.DataDir)
 	a.Queue.Now = o.Now
 	dev, _ := enroll.Load(o.DataDir)
-	client, err := enroll.Client(o.DataDir, o.HTTP)
-	if err != nil {
+	if _, err := enroll.Client(o.DataDir, o.HTTP); err != nil {
 		return ErrCannotSend
 	}
 	if o.QueueLimit == 0 {
 		o.QueueLimit = a.Queue.Cap / 2
 	}
+	// The client is rebuilt for each flush, so a login during the backfill
+	// is picked up instead of the replaced key being used (and rejected).
+	lastSize := a.Queue.Size()
 	flush := func() {
+		defer func() { lastSize = a.Queue.Size() }()
+		client, err := enroll.Client(o.DataDir, o.HTTP)
+		if err != nil {
+			return
+		}
 		fctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
 		a.Queue.Flush(fctx, client)
@@ -145,8 +152,9 @@ func Backfill(ctx context.Context, o BackfillOptions) error {
 			sessions++
 			events += n
 		}
-		// Flush about a batch at a time rather than per transcript.
-		if a.Queue.Size() < min(flushEvery, o.QueueLimit) {
+		// Flush about a batch at a time: once a batch has been queued since
+		// the last flush, whether or not that flush drained the queue.
+		if a.Queue.Size()-lastSize < min(flushEvery, o.QueueLimit) {
 			continue
 		}
 		flush()
