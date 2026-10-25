@@ -12,6 +12,8 @@ import (
 
 // @spec: device-enrollment#interactive-enrollment
 func TestLoginCommand(t *testing.T) {
+	var started string
+	startBackfill = func(d string) error { started = d; return nil }
 	srv := httptest.NewServer(fakeingest.New(fakeingest.Options{}))
 	defer srv.Close()
 	dir := t.TempDir()
@@ -28,6 +30,9 @@ func TestLoginCommand(t *testing.T) {
 	}
 	if _, err := enroll.Load(dir); err != nil {
 		t.Fatal(err)
+	}
+	if started != dir {
+		t.Fatalf("backfill started for %q", started)
 	}
 }
 

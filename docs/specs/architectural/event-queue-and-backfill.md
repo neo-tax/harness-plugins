@@ -11,6 +11,9 @@ affects:
   - internal/ingest/*.go
   - internal/agent/*.go
   - internal/cursor/*.go
+  - internal/adapter/claudecode/backfill.go
+  - cmd/neo-tax-agent/*.go
+  - plugins/claude-code/skills/backfill/SKILL.md
   - internal/adapter/claudecode/hooks.go
 ---
 
@@ -36,11 +39,11 @@ Governs how the agent stores session events on disk between hooks, flushes them 
 - `queue-cap`(tested): The queue is capped at 50 MB; when exceeded, the oldest segment is deleted.
 - `dropped-events-reported`(tested): The number of events deleted by the cap is counted and carried as `dropped_events` on the next `session.opened` or `session.closed` event, then reset.
 - `flush-lock`(tested): A single lock file serializes flushes; a hook that cannot acquire it exits without flushing and leaves its events for the next hook.
-- `backfill-scope`(approved): A backfill enumerates every transcript on disk for the harness and emits events for each from the beginning, newest transcript first.
-- `backfill-after-login`(approved): An interactive enrollment starts a backfill immediately after the device key is stored.
-- `backfill-lock`(approved): A backfill holds a lock so that two backfills cannot run at once; a second request exits.
-- `backfill-command`(approved): The agent exposes a backfill command, reachable through the harness's `neo-tax:backfill` entry point, that resets every cursor and re-runs the backfill.
-- `backfill-idempotent-server-side`(approved): A re-run backfill resends events the server has already accepted, and relies on the server's idempotency key to discard them.
+- `backfill-scope`(tested): A backfill enumerates every transcript on disk for the harness and emits events for each from the beginning, newest transcript first.
+- `backfill-after-login`(tested): An interactive enrollment starts a backfill immediately after the device key is stored.
+- `backfill-lock`(tested): A backfill holds a lock so that two backfills cannot run at once; a second request exits.
+- `backfill-command`(tested): The agent exposes a backfill command, reachable through the harness's `neo-tax:backfill` entry point, that resets every cursor and re-runs the backfill.
+- `backfill-idempotent-server-side`(tested): A re-run backfill resends events the server has already accepted, and relies on the server's idempotency key to discard them.
 - `no-daemon`(built): The agent runs only when a hook or a command invokes it; nothing runs between invocations.
   - status-reason: structural; the agent is a short-lived process with no background goroutine or service, which no test can observe
 
@@ -49,6 +52,8 @@ Governs how the agent stores session events on disk between hooks, flushes them 
 Flushing on every hook rather than on a timer is what makes the no-daemon model work: a laptop that is offline for a week sends nothing, and the first hook after it reconnects drains the queue in batches of 500. The persisted backoff is what keeps that from turning into a retry on every turn while offline.
 
 Backfill runs newest first because the most recent work is what an engineer and an operator want to see land; retention bounds how far back it reaches, so no cutoff is needed.
+
+A turn carries no repository, so a backfill emits a `session.opened` for each past session before its turns: `started_at`, `entrypoint`, and `branch` come from the transcript; `repo` and `git_user_email` come from the session's working directory as it is today (read locally from the transcript, never sent); `source` and `head_sha` are null because the harness's reason and the commit at the time are unknown. If hooks already sent the session's `session.opened`, the server's idempotency key discards the backfilled one. Interactive login starts the backfill as a detached `neo-tax-agent backfill` process, so login returns at once.
 
 The random 0–30 minute delay before backfill belongs to managed enrollment, where a fleet enrolls at once; interactive enrollment has a human waiting and starts immediately.
 

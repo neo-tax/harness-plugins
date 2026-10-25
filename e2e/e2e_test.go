@@ -43,6 +43,7 @@ type world struct {
 	data       string
 	repo       string
 	transcript string
+	config     string // CLAUDE_CONFIG_DIR, so backfill never reads this machine's sessions
 }
 
 func freePort(t *testing.T) string {
@@ -62,7 +63,7 @@ func newWorld(t *testing.T) *world {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
-	w := &world{t: t, url: "http://" + addr, data: t.TempDir(), repo: t.TempDir()}
+	w := &world{t: t, url: "http://" + addr, data: t.TempDir(), repo: t.TempDir(), config: t.TempDir()}
 	for i := 0; ; i++ {
 		if resp, err := http.Get(w.url + "/_fake/events"); err == nil {
 			resp.Body.Close()
@@ -92,7 +93,8 @@ func newWorld(t *testing.T) *world {
 }
 
 func (w *world) env() []string {
-	return append(os.Environ(), "NEO_TAX_AGENT_BIN="+agentBin, "NEO_TAX_DATA_DIR="+w.data, "CLAUDE_CODE_ENTRYPOINT=cli", "GIT_CONFIG_GLOBAL=/dev/null")
+	return append(os.Environ(), "NEO_TAX_AGENT_BIN="+agentBin, "NEO_TAX_DATA_DIR="+w.data, "CLAUDE_CODE_ENTRYPOINT=cli",
+		"GIT_CONFIG_GLOBAL=/dev/null", "CLAUDE_CONFIG_DIR="+w.config)
 }
 
 // shim runs the plugin's bin/neo-tax-agent, as hooks and skills do.
@@ -270,5 +272,64 @@ func TestLoginWithoutInputExplains(t *testing.T) {
 	out, code := w.shim("", "login", "--server", w.url)
 	if code != 3 || !strings.Contains(out, "--token") {
 		t.Fatalf("exit %d: %s", code, out)
+	}
+}
+
+// pastSession puts a finished session under CLAUDE_CONFIG_DIR/projects.
+func (w *world) pastSession() {
+	w.t.Helper()
+	dir := filepath.Join(w.config, "projects", "-past")
+	os.MkdirAll(dir, 0o700)
+	os.WriteFile(filepath.Join(dir, "past-session.jsonl"), []byte(`{"type":"user","timestamp":"2026-10-20T09:00:00Z","cwd":"`+w.repo+`","gitBranch":"old","version":"2.1.310","message":{"content":"x"}}
+{"type":"assistant","timestamp":"2026-10-20T09:00:01Z","gitBranch":"old","version":"2.1.310","message":{"id":"msg_P","model":"m","usage":{"input_tokens":3,"output_tokens":4}}}
+`), 0o600)
+}
+
+func (w *world) waitFor(n int) []map[string]any {
+	w.t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		got := w.recorded()
+		if len(got) >= n || time.Now().After(deadline) {
+			return got
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// @spec: event-queue-and-backfill#backfill-after-login
+// @spec: device-enrollment#backfill-after-interactive-login
+func TestLoginStartsBackfill(t *testing.T) {
+	w := newWorld(t)
+	w.pastSession()
+	out, code := w.shim("", "login", "--server", w.url, "--token", "et", "--email", "e@example.com")
+	if code != 0 || !strings.Contains(out, "background") {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	got := w.waitFor(2)
+	if k := kinds(got); k != "opened,turn" || got[0]["session_id"] != "past-session" {
+		t.Fatalf("recorded %s", k)
+	}
+}
+
+// @spec: event-queue-and-backfill#backfill-command
+func TestBackfillCommand(t *testing.T) {
+	w := newWorld(t)
+	w.login() // also starts a background backfill of the (empty) projects dir
+	w.pastSession()
+	var out string
+	var code int
+	for deadline := time.Now().Add(30 * time.Second); ; {
+		out, code = w.shim("", "backfill")
+		if !strings.Contains(out, "already running") || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if code != 0 || !strings.Contains(out, "Backfilled 1 sessions") {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	if k := kinds(w.recorded()); k != "opened,turn" {
+		t.Fatalf("recorded %s", k)
 	}
 }

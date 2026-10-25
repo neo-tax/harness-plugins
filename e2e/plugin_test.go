@@ -62,21 +62,24 @@ func TestHookRegistrations(t *testing.T) {
 	}
 }
 
-// The login skill holds no logic: its only instruction to run anything is
-// the agent's login command.
+// Each skill holds no logic: its only instruction to run anything is the
+// agent command of the same name.
 // @spec: device-enrollment#login-skill-delegates-to-agent
-func TestLoginSkillDelegatesToAgent(t *testing.T) {
-	b, err := os.ReadFile(pluginDir + "/skills/login/SKILL.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := string(b)
-	if !strings.Contains(s, "\nname: login\n") {
-		t.Error("skill is not named login")
-	}
-	blocks := regexp.MustCompile("(?s)```bash\n(.*?)```").FindAllStringSubmatch(s, -1)
-	if len(blocks) != 1 || strings.TrimSpace(blocks[0][1]) != `"${CLAUDE_SKILL_DIR}/../../bin/neo-tax-agent" login` {
-		t.Fatalf("code blocks %q", blocks)
+// @spec: event-queue-and-backfill#backfill-command
+func TestSkillsDelegateToAgent(t *testing.T) {
+	for _, name := range []string{"login", "backfill"} {
+		b, err := os.ReadFile(pluginDir + "/skills/" + name + "/SKILL.md")
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := string(b)
+		if !strings.Contains(s, "\nname: "+name+"\n") {
+			t.Errorf("skill is not named %s", name)
+		}
+		blocks := regexp.MustCompile("(?s)```bash\n(.*?)```").FindAllStringSubmatch(s, -1)
+		if len(blocks) != 1 || strings.TrimSpace(blocks[0][1]) != `"${CLAUDE_SKILL_DIR}/../../bin/neo-tax-agent" `+name {
+			t.Fatalf("%s code blocks %q", name, blocks)
+		}
 	}
 }
 

@@ -36,7 +36,7 @@ Governs how a device obtains its device key: the enrollment token an admin mints
 - `key-storage-location`(tested): The device key and device id are stored in the harness-provided plugin data directory, readable only by the owning user.
 - `key-never-in-events`(tested): The device key never appears in a session event, a queue segment, a dead-letter file, or a log line.
 - `rejected-key-stops-flushing`(tested): When ingest returns 401 or 403, the agent marks the device as needing re-enrollment, keeps queuing events, and does not attempt another flush until enrollment succeeds.
-- `backfill-after-interactive-login`(approved): A successful interactive enrollment starts a backfill of existing transcripts immediately.
+- `backfill-after-interactive-login`(tested): A successful interactive enrollment starts a backfill of existing transcripts immediately.
 - `managed-enrollment-deferred`(built): Managed delivery of the enrollment token (a file placed by device management or an environment variable, enrolling silently at the first session start with `email_confirmed_by` as `auto` and a random delay before backfill) is not part of v0.1.
   - status-reason: intentionally absent; the agent has no code path that reads an enrollment token from a file or the environment
 

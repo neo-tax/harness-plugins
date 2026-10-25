@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
@@ -29,7 +30,8 @@ const usage = `usage: neo-tax-agent <command> [flags]
 
 commands:
   hook <name>  handle a harness hook; the payload is read from standard input
-  login        enroll this device with an enrollment token
+  login        enroll this device with an enrollment token, then start a backfill
+  backfill     reset every cursor and resend events for every transcript on disk
   version    print the agent version
 `
 
@@ -50,6 +52,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return login(args[1:], stdin, stdout, stderr)
 	case "hook":
 		return hook(args[1:], stdin)
+	case "backfill":
+		return backfill(args[1:], stdout, stderr)
 	default:
 		fmt.Fprint(stderr, usage)
 		return 2
@@ -136,6 +140,52 @@ func login(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	case errors.Is(err, enroll.ErrNeedInput):
 		return 3
 	case err != nil:
+		fmt.Fprintln(stderr, "neo-tax-agent:", err)
+		return 1
+	}
+	// @spec: event-queue-and-backfill#backfill-after-login
+	// @spec: device-enrollment#backfill-after-interactive-login
+	if err := startBackfill(d); err != nil {
+		fmt.Fprintln(stderr, "neo-tax-agent: could not start the backfill; run neo-tax:backfill:", err)
+		return 0
+	}
+	fmt.Fprintln(stdout, "Sending your existing Claude Code sessions in the background.")
+	return 0
+}
+
+// startBackfill runs "neo-tax-agent backfill" detached from this process,
+// so login returns while the backfill runs under its own command.
+var startBackfill = func(dataDir string) error {
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(self, "backfill", "--data-dir", dataDir)
+	detach(cmd)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
+}
+
+func backfill(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("backfill", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("data-dir", "", "plugin data directory (default $CLAUDE_PLUGIN_DATA)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	d := dataDir(*dir)
+	if d == "" {
+		fmt.Fprintln(stderr, "neo-tax-agent: no plugin data directory; pass --data-dir")
+		return 2
+	}
+	err := claudecode.Backfill(context.Background(), claudecode.BackfillOptions{DataDir: d, AgentVersion: Version, Out: stdout})
+	if errors.Is(err, claudecode.ErrBackfillRunning) {
+		fmt.Fprintln(stdout, "A backfill is already running.")
+		return 0
+	}
+	if err != nil {
 		fmt.Fprintln(stderr, "neo-tax-agent:", err)
 		return 1
 	}

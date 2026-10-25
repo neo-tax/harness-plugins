@@ -1,0 +1,229 @@
+package claudecode
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"time"
+
+	"github.com/gofrs/flock"
+	"github.com/neo-tax/harness-plugins/contract"
+	"github.com/neo-tax/harness-plugins/internal/agent"
+	"github.com/neo-tax/harness-plugins/internal/cursor"
+	"github.com/neo-tax/harness-plugins/internal/enroll"
+	"github.com/neo-tax/harness-plugins/internal/gitident"
+)
+
+// ErrBackfillRunning means another backfill holds the backfill lock.
+var ErrBackfillRunning = errors.New("a backfill is already running")
+
+// BackfillOptions configures a backfill.
+type BackfillOptions struct {
+	DataDir      string
+	ConfigDir    string // Claude Code's config directory; ConfigDir() when empty
+	AgentVersion string
+	Now          func() time.Time
+	HTTP         *http.Client
+	Out          io.Writer
+}
+
+// ConfigDir is Claude Code's configuration directory: $CLAUDE_CONFIG_DIR, or
+// ~/.claude.
+func ConfigDir() string {
+	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
+		return d
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude")
+}
+
+// Backfill resets every cursor and emits events for every Claude Code
+// transcript on disk, newest first, from the beginning, flushing as it
+// goes. It runs as its own command, never under a hook.
+//
+// @spec: event-queue-and-backfill#backfill-scope
+// @spec: event-queue-and-backfill#backfill-lock
+// @spec: event-queue-and-backfill#backfill-command
+// @spec: event-queue-and-backfill#backfill-idempotent-server-side
+func Backfill(ctx context.Context, o BackfillOptions) error {
+	if o.Now == nil {
+		o.Now = time.Now
+	}
+	if o.ConfigDir == "" {
+		o.ConfigDir = ConfigDir()
+	}
+	if o.Out == nil {
+		o.Out = io.Discard
+	}
+	if o.HTTP == nil {
+		o.HTTP = &http.Client{Timeout: 30 * time.Second}
+	}
+	if err := os.MkdirAll(o.DataDir, 0o700); err != nil {
+		return err
+	}
+	lock := flock.New(filepath.Join(o.DataDir, "backfill.lock"))
+	ok, err := lock.TryLock()
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrBackfillRunning
+	}
+	defer lock.Unlock()
+
+	store := cursor.Open(o.DataDir)
+	if err := withCursorLock(store, store.Reset); err != nil {
+		return err
+	}
+
+	a := agent.New(o.DataDir)
+	a.Queue.Now = o.Now
+	dev, _ := enroll.Load(o.DataDir)
+	client, clientErr := enroll.Client(o.DataDir, o.HTTP)
+	flush := func() {
+		if clientErr != nil {
+			return
+		}
+		fctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		a.Queue.Flush(fctx, client)
+	}
+
+	transcripts := mainTranscripts(filepath.Join(o.ConfigDir, "projects"))
+	var sessions, events int
+	for _, path := range transcripts {
+		if ctx.Err() != nil {
+			break
+		}
+		n, err := backfillOne(a, store, path, dev.DeviceID, o)
+		if err != nil {
+			agent.Logf(o.DataDir, "backfill transcript failed: %s", errClass(err))
+			continue
+		}
+		if n > 0 {
+			sessions++
+			events += n
+		}
+		flush()
+	}
+	fmt.Fprintf(o.Out, "Backfilled %d sessions (%d events).\n", sessions, events)
+	return nil
+}
+
+func withCursorLock(store *cursor.Store, fn func() error) error {
+	unlock, err := store.Lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return fn()
+}
+
+// mainTranscripts lists every session's main transcript under projects/,
+// newest first by modification time.
+func mainTranscripts(projectsDir string) []string {
+	paths, _ := filepath.Glob(filepath.Join(projectsDir, "*", "*.jsonl"))
+	mod := map[string]time.Time{}
+	for _, p := range paths {
+		if fi, err := os.Stat(p); err == nil {
+			mod[p] = fi.ModTime()
+		}
+	}
+	sort.SliceStable(paths, func(i, j int) bool { return mod[paths[i]].After(mod[paths[j]]) })
+	return paths
+}
+
+// sessionStart is what a backfill knows about how a past session began. Cwd
+// is read only to find the repository; it never reaches an event.
+type sessionStart struct {
+	Timestamp  time.Time `json:"timestamp"`
+	Cwd        string    `json:"cwd"`
+	GitBranch  string    `json:"gitBranch"`
+	Entrypoint string    `json:"entrypoint"`
+	Version    string    `json:"version"`
+}
+
+func readSessionStart(path string) (sessionStart, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return sessionStart{}, false
+	}
+	defer f.Close()
+	var out sessionStart
+	found := false
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 1<<20), 64<<20)
+	for sc.Scan() {
+		var s sessionStart
+		if json.Unmarshal(sc.Bytes(), &s) != nil || s.Timestamp.IsZero() {
+			continue
+		}
+		if !found {
+			out, found = s, true
+		}
+		if out.Cwd == "" {
+			out.Cwd = s.Cwd
+		}
+		if out.GitBranch == "" {
+			out.GitBranch = s.GitBranch
+		}
+		if out.Entrypoint == "" {
+			out.Entrypoint = s.Entrypoint
+		}
+		if out.Version == "" {
+			out.Version = s.Version
+		}
+		if out.Cwd != "" && out.GitBranch != "" && out.Entrypoint != "" && out.Version != "" {
+			break
+		}
+	}
+	return out, found
+}
+
+// backfillOne queues a past session's session.opened and every turn and
+// pull-request link in its transcripts. The session's repository comes from
+// its working directory as it is today; branches come from the transcript,
+// and head_sha is null because the commit at the time is unknown.
+func backfillOne(a *agent.Agent, store *cursor.Store, path, deviceID string, o BackfillOptions) (int, error) {
+	start, ok := readSessionStart(path)
+	if !ok {
+		return 0, nil
+	}
+	git := gitident.Identify(start.Cwd)
+	sessionID := sessionIDOf(path)
+	ctx := Context{DeviceID: deviceID, AgentVersion: o.AgentVersion, SessionID: sessionID, Now: o.Now()}
+
+	var n int
+	err := withCursorLock(store, func() error {
+		res, err := TailEvents(ctx, path, store)
+		if err != nil {
+			return err
+		}
+		opened := contract.NewOpened(ctx.envelope(start.Version), contract.OpenedFields{
+			StartedAt:    start.Timestamp.UTC(),
+			Entrypoint:   nonEmpty(start.Entrypoint),
+			Repo:         git.Repo,
+			Branch:       nonEmpty(start.GitBranch),
+			GitUserEmail: git.UserEmail,
+		})
+		events := append([]any{opened}, res.Events...)
+		if err := a.Emit(events...); err != nil {
+			return err
+		}
+		n = len(events)
+		return res.Commit()
+	})
+	return n, err
+}
+
+func sessionIDOf(path string) string {
+	base := filepath.Base(path)
+	return base[:len(base)-len(filepath.Ext(base))]
+}
