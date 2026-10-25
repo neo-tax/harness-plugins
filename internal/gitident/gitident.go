@@ -52,7 +52,7 @@ func Identify(dir string) Identity {
 	// an unborn branch git prints the two directories (and, depending on the
 	// version, an unresolved "HEAD") and exits non-zero; the branch is then
 	// read from the HEAD file itself.
-	cmd := exec.CommandContext(ctx, GitCommand, "-C", dir, "rev-parse", "--path-format=absolute",
+	cmd := exec.CommandContext(ctx, GitCommand, "-C", dir, "rev-parse",
 		"--git-dir", "--git-common-dir", "HEAD", "--symbolic-full-name", "HEAD")
 	// A harness or git hook may export these; they would override -C.
 	cmd.Env = withoutEnv(os.Environ(), "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE")
@@ -62,11 +62,21 @@ func Identify(dir string) Identity {
 	switch {
 	case err == nil && len(lines) == 4:
 		gitDir, commonDir, sha, ref = lines[0], lines[1], lines[2], lines[3]
-	case isExitError(err) && ctx.Err() == nil && len(lines) >= 2 && len(lines) <= 3 && filepath.IsAbs(lines[0]) && filepath.IsAbs(lines[1]):
+	case isExitError(err) && ctx.Err() == nil && len(lines) >= 2 && len(lines) <= 3 && lines[0] != "" && lines[1] != "":
 		gitDir, commonDir = lines[0], lines[1]
-		ref = unbornRef(gitDir)
 	default:
 		return Identity{}
+	}
+	// Without --path-format=absolute (git 2.31+), rev-parse may print these
+	// relative to dir, which is git's working directory under -C.
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(dir, gitDir)
+	}
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Join(dir, commonDir)
+	}
+	if sha == "" {
+		ref = unbornRef(gitDir)
 	}
 
 	var id Identity
