@@ -10,6 +10,7 @@ affects:
   - internal/queue/*.go
   - internal/ingest/*.go
   - internal/agent/*.go
+  - internal/cursor/*.go
 ---
 
 # Event queue and backfill
@@ -21,7 +22,7 @@ Governs how the agent stores session events on disk between hooks, flushes them 
 - `queue-is-jsonl-segments`(tested): Queued events are appended one per line to segment files under a queue directory in the harness-provided plugin data directory.
 - `segment-rotation`(tested): A segment is closed and a new one opened when it exceeds 1 MB.
 - `no-database`(tested): The queue uses no embedded database; a corrupt segment loses at most that segment.
-- `cursor-per-transcript`(approved): A cursor file records, for each transcript path including subagent transcripts, the last emitted message id and byte offset.
+- `cursor-per-transcript`(tested): A cursor file records, for each transcript path including subagent transcripts, the last emitted message id and byte offset.
 - `flush-on-every-hook`(approved): Every hook invocation attempts a flush after queuing its own events.
 - `flush-batch-size`(tested): A flush sends oldest events first, at most 500 per request.
 - `segment-advances-on-success`(tested): A segment is deleted only after every event in it has been accepted or recorded as a duplicate by the server.

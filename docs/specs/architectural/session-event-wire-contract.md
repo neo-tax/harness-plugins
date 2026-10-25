@@ -11,6 +11,7 @@ affects:
   - contract/*.go
   - internal/fakeingest/*.go
   - cmd/fake-ingest/*.go
+  - internal/adapter/claudecode/transcript.go
 ---
 
 # Session event wire contract
@@ -33,7 +34,7 @@ Governs every request and response exchanged between the agent and Neo.Tax: the 
 - `pr-opened-fields`(tested): A `session.pr_opened` event carries `repo`, `number`, and `timestamp`.
 - `closed-fields`(tested): A `session.closed` event carries `ended_at`, `reason`, and `dropped_events`.
 - `repo-shape`(tested): `repo` is either null or an object of `host`, `owner`, and `name`, each lowercase.
-- `subagent-turns-belong-to-parent`(approved): A turn produced by a subagent carries the parent session's `session_id` and a non-null `subagent_id`; a main-thread turn carries a null `subagent_id`.
+- `subagent-turns-belong-to-parent`(tested): A turn produced by a subagent carries the parent session's `session_id` and a non-null `subagent_id`; a main-thread turn carries a null `subagent_id`.
 - `idempotency-key`(approved): The server treats two events with the same `device_id`, `session_id`, `event_kind`, and `message_id` as the same event; for kinds without a `message_id`, the key uses the event kind alone within the session.
 - `batched-ingest`(tested): An ingest request carries an ordered array of between 1 and 500 session events.
 - `ingest-response-per-event`(tested): An ingest response reports, for the batch as a whole, how many events were accepted, how many were duplicates, and the index and reason of each event rejected for schema reasons.

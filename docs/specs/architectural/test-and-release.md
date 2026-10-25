@@ -9,6 +9,9 @@ version: 1
 affects:
   - internal/fakeingest/*.go
   - .github/workflows/ci.yml
+  - internal/adapter/claudecode/anonymize.go
+  - internal/adapter/claudecode/testdata/fixtures/**
+  - cmd/anonymize-transcript/*.go
 ---
 
 # Test and release
@@ -17,9 +20,10 @@ Governs how the agent and plugins are tested, how a release is cut, and what art
 
 ## Requirements
 
-- `fixtures-from-real-transcripts`(approved): Parser fixtures are real harness transcripts passed through a checked-in anonymizer that replaces emails, paths, repository names, and all message content with placeholders while preserving ids, usage blocks, timestamps, branches, and pull-request link lines.
-- `fixture-pairs-expected-stream`(approved): Every fixture transcript is paired with the expected event stream it must produce, and the parser test compares the two exactly.
-- `fixture-per-harness-version`(approved): Each supported harness version has at least one fixture.
+- `fixtures-from-real-transcripts`(built): Parser fixtures are real harness transcripts passed through a checked-in anonymizer that replaces emails, paths, repository names, and all message content with placeholders while preserving ids, usage blocks, timestamps, branches, and pull-request link lines.
+  - status-reason: the allowlisting anonymizer (cmd/anonymize-transcript) is built and tested; committing an anonymized real transcript awaits the owner's approval, so the only fixture today is synthetic
+- `fixture-pairs-expected-stream`(tested): Every fixture transcript is paired with the expected event stream it must produce, and the parser test compares the two exactly.
+- `fixture-per-harness-version`(tested): Each supported harness version has at least one fixture.
 - `unit-coverage`(approved): The parser, repository normalization, queue, backoff, and allowlist each have unit tests covering every requirement in their spec that can be exercised without a network.
 - `contract-test`(approved): A test validates every event the agent can emit against the schema documents in this repository.
 - `end-to-end-against-fake-ingest`(approved): A test execs the agent in the exact shape a harness hook does, with the hook name on the command line and a payload on standard input, against the fake ingest server, and asserts the recorded events.
