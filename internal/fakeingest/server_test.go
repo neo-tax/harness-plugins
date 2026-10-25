@@ -281,3 +281,18 @@ func TestNonObjectEventRejectedPerEvent(t *testing.T) {
 		t.Fatalf("status %d %+v %s", resp.StatusCode, ir, body)
 	}
 }
+
+// Two pull requests opened from one session are two events.
+// @spec: session-event-wire-contract#idempotency-key
+func TestTwoPROpenedInOneSessionAreDistinct(t *testing.T) {
+	h := start(t, fakeingest.Options{})
+	er := h.enroll()
+	env := turn(er.DeviceID, "x").Envelope
+	pr := func(n int64) contract.PROpened {
+		return contract.NewPROpened(env, contract.PROpenedFields{Repo: &contract.Repo{Host: "github.com", Owner: "o", Name: "r"}, Number: n, Timestamp: env.SentAt})
+	}
+	_, ir, _ := h.ingest(er.DeviceKey, pr(42), pr(43), pr(42))
+	if ir.Accepted != 2 || ir.Duplicates != 1 {
+		t.Fatalf("%+v", ir)
+	}
+}

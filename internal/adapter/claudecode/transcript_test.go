@@ -114,12 +114,12 @@ func TestFixtures(t *testing.T) {
 	for _, dir := range dirs {
 		t.Run(filepath.Base(dir), func(t *testing.T) {
 			main, sid := copyFixture(t, dir)
-			events, commit, err := claudecode.TailEvents(fixtureContext(sid), main, cursor.Open(t.TempDir()))
+			r, err := claudecode.TailEvents(fixtureContext(sid), main, cursor.Open(t.TempDir()))
 			if err != nil {
 				t.Fatal(err)
 			}
-			commit()
-			got := toLines(t, events)
+			r.Commit()
+			got := toLines(t, r.Events)
 			expPath := filepath.Join(dir, "expected.jsonl")
 			if *update && !strings.HasPrefix(filepath.Base(dir), "synthetic") {
 				var buf bytes.Buffer
@@ -162,17 +162,17 @@ func TestIncrementalReadsMatchWholeRead(t *testing.T) {
 		// sometimes sees a partial last line.
 		half := len(line) / 2
 		f.WriteString(line[:half])
-		evs, commit, err := claudecode.TailEvents(fixtureContext("fixture-session"), main, store)
+		r, err := claudecode.TailEvents(fixtureContext("fixture-session"), main, store)
 		if err != nil {
 			t.Fatal(err)
 		}
-		commit()
-		got = append(got, evs...)
+		r.Commit()
+		got = append(got, r.Events...)
 		f.WriteString(line[half:])
 		f.Close()
-		evs, commit, _ = claudecode.TailEvents(fixtureContext("fixture-session"), main, store)
-		commit()
-		got = append(got, evs...)
+		r, _ = claudecode.TailEvents(fixtureContext("fixture-session"), main, store)
+		r.Commit()
+		got = append(got, r.Events...)
 	}
 	want := readExpected(t, "testdata/fixtures/synthetic-2.1.310/expected.jsonl")
 	var mainWant []map[string]any
@@ -191,14 +191,14 @@ func TestIncrementalReadsMatchWholeRead(t *testing.T) {
 func TestCursorAdvancesOnlyOnCommit(t *testing.T) {
 	main, sid := copyFixture(t, "testdata/fixtures/synthetic-2.1.310")
 	store := cursor.Open(t.TempDir())
-	first, _, _ := claudecode.TailEvents(fixtureContext(sid), main, store)
-	again, commit, _ := claudecode.TailEvents(fixtureContext(sid), main, store)
-	if len(first) == 0 || len(again) != len(first) {
-		t.Fatalf("%d then %d", len(first), len(again))
+	first, _ := claudecode.TailEvents(fixtureContext(sid), main, store)
+	again, _ := claudecode.TailEvents(fixtureContext(sid), main, store)
+	if len(first.Events) == 0 || len(again.Events) != len(first.Events) {
+		t.Fatalf("%d then %d", len(first.Events), len(again.Events))
 	}
-	commit()
-	if after, _, _ := claudecode.TailEvents(fixtureContext(sid), main, store); len(after) != 0 {
-		t.Fatalf("%d events after commit", len(after))
+	again.Commit()
+	if after, _ := claudecode.TailEvents(fixtureContext(sid), main, store); len(after.Events) != 0 {
+		t.Fatalf("%d events after commit", len(after.Events))
 	}
 }
 
@@ -206,14 +206,14 @@ func TestCursorAdvancesOnlyOnCommit(t *testing.T) {
 func TestShrunkTranscriptRereadFromStart(t *testing.T) {
 	main, sid := copyFixture(t, "testdata/fixtures/synthetic-2.1.310")
 	store := cursor.Open(t.TempDir())
-	_, commit, _ := claudecode.TailEvents(fixtureContext(sid), main, store)
-	commit()
+	r, _ := claudecode.TailEvents(fixtureContext(sid), main, store)
+	r.Commit()
 	b, _ := os.ReadFile(main)
 	lines := strings.SplitAfter(string(b), "\n")
 	os.WriteFile(main, []byte(lines[len(lines)-2]), 0o644) // only msg_C remains
-	evs, _, _ := claudecode.TailEvents(fixtureContext(sid), main, store)
-	if len(evs) != 1 {
-		t.Fatalf("%d events", len(evs))
+	again, _ := claudecode.TailEvents(fixtureContext(sid), main, store)
+	if len(again.Events) != 1 {
+		t.Fatalf("%d events", len(again.Events))
 	}
 }
 
@@ -224,27 +224,27 @@ func TestMalformedLinesSkipped(t *testing.T) {
 	f.WriteString("{not json\n")
 	f.WriteString(`{"type":"assistant","timestamp":"2026-10-25T10:00:12Z","message":{"id":"msg_D","usage":"weird"}}` + "\n")
 	f.Close()
-	evs, _, err := claudecode.TailEvents(fixtureContext(sid), main, cursor.Open(t.TempDir()))
+	r, err := claudecode.TailEvents(fixtureContext(sid), main, cursor.Open(t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := len(evs); n != 6 { // five expected + msg_D with unknown usage
+	if n := len(r.Events); n != 6 { // five expected + msg_D with unknown usage
 		t.Fatalf("%d events", n)
 	}
 }
 
 func TestMissingTranscriptIsEmpty(t *testing.T) {
-	evs, _, err := claudecode.TailEvents(fixtureContext("s"), filepath.Join(t.TempDir(), "nope.jsonl"), cursor.Open(t.TempDir()))
-	if err != nil || len(evs) != 0 {
-		t.Fatalf("%v %d", err, len(evs))
+	r, err := claudecode.TailEvents(fixtureContext("s"), filepath.Join(t.TempDir(), "nope.jsonl"), cursor.Open(t.TempDir()))
+	if err != nil || len(r.Events) != 0 {
+		t.Fatalf("%v %d", err, len(r.Events))
 	}
 }
 
 // @spec: claude-code-transcript-parser#content-never-read-into-events
 func TestNoContentInEvents(t *testing.T) {
 	main, sid := copyFixture(t, "testdata/fixtures/synthetic-2.1.310")
-	evs, _, _ := claudecode.TailEvents(fixtureContext(sid), main, cursor.Open(t.TempDir()))
-	b, _ := json.Marshal(evs)
+	r, _ := claudecode.TailEvents(fixtureContext(sid), main, cursor.Open(t.TempDir()))
+	b, _ := json.Marshal(r.Events)
 	for _, secret := range []string{"Acme", "acme", "secret reasoning", "id_rsa", "PRIVATE KEY", "Done", "found it", "/Users/someone", "explore the repo"} {
 		if bytes.Contains(b, []byte(secret)) {
 			t.Errorf("event stream contains %q", secret)
@@ -259,5 +259,47 @@ func TestEverySupportedVersionHasAFixture(t *testing.T) {
 		if len(m) == 0 {
 			t.Errorf("no fixture for Claude Code %s", v)
 		}
+	}
+}
+
+// A transcript rewritten to at least its old length is detected by its
+// changed first line and read again from the start.
+func TestRewrittenTranscriptOfSameLengthRereadFromStart(t *testing.T) {
+	main, sid := copyFixture(t, "testdata/fixtures/synthetic-2.1.310")
+	store := cursor.Open(t.TempDir())
+	r, _ := claudecode.TailEvents(fixtureContext(sid), main, store)
+	r.Commit()
+	b, _ := os.ReadFile(main)
+	lines := strings.SplitAfter(string(b), "\n")
+	rewritten := `{"type":"system","subtype":"compact_boundary","timestamp":"2026-10-25T11:00:00Z"}` + "\n" + strings.Join(lines[1:], "") + lines[1]
+	os.WriteFile(main, []byte(rewritten), 0o644)
+	again, _ := claudecode.TailEvents(fixtureContext(sid), main, store)
+	if len(again.Events) != 4 { // every main-transcript event, re-read
+		t.Fatalf("%d events", len(again.Events))
+	}
+}
+
+func TestMalformedLinesAreCounted(t *testing.T) {
+	main, sid := copyFixture(t, "testdata/fixtures/synthetic-2.1.310")
+	f, _ := os.OpenFile(main, os.O_APPEND|os.O_WRONLY, 0)
+	f.WriteString("{not json\n{\"also\": broken\n")
+	f.Close()
+	r, _ := claudecode.TailEvents(fixtureContext(sid), main, cursor.Open(t.TempDir()))
+	if r.ParseFailures != 2 {
+		t.Fatalf("%d failures", r.ParseFailures)
+	}
+}
+
+// Cursors for transcripts that no longer exist are dropped on commit.
+func TestCommitPrunesVanishedTranscripts(t *testing.T) {
+	main, sid := copyFixture(t, "testdata/fixtures/synthetic-2.1.310")
+	dir := t.TempDir()
+	store := cursor.Open(dir)
+	store.Put("/gone/session.jsonl", cursor.Cursor{Offset: 9})
+	r, _ := claudecode.TailEvents(fixtureContext(sid), main, store)
+	r.Commit()
+	b, _ := os.ReadFile(filepath.Join(dir, "cursors.json"))
+	if strings.Contains(string(b), "/gone/") {
+		t.Fatalf("stale cursor kept: %s", b)
 	}
 }

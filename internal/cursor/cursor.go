@@ -23,6 +23,9 @@ type Cursor struct {
 	Offset    int64  `json:"offset"`
 	MessageID string `json:"message_id,omitempty"`
 	Version   string `json:"version,omitempty"` // last harness version seen
+	// Head identifies the transcript's first line, so a rewrite of the file
+	// is detected even when it is no shorter than Offset.
+	Head string `json:"head,omitempty"`
 }
 
 // Store is the cursor file of one plugin data directory.
@@ -48,6 +51,24 @@ func (s *Store) Get(path string) Cursor { return s.load()[path] }
 func (s *Store) Put(path string, c Cursor) error {
 	m := s.load()
 	m[path] = c
+	return s.write(m)
+}
+
+// All returns every stored cursor, keyed by transcript path.
+func (s *Store) All() map[string]Cursor { return s.load() }
+
+// Update records several cursors in one write and drops cursors whose
+// transcript no longer exists. Callers hold Lock.
+func (s *Store) Update(updates map[string]Cursor) error {
+	m := s.load()
+	for path, c := range updates {
+		m[path] = c
+	}
+	for path := range m {
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+			delete(m, path)
+		}
+	}
 	return s.write(m)
 }
 

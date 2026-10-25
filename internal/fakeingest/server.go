@@ -190,6 +190,10 @@ func idempotencyKey(ev map[string]any) string {
 	if id, ok := ev["message_id"]; ok {
 		key += "\x00" + fmt.Sprint(id)
 	}
+	if ev["event_kind"] == contract.KindPROpened {
+		repo, _ := json.Marshal(ev["repo"])
+		key += "\x00" + string(repo) + "\x00" + fmt.Sprint(ev["number"])
+	}
 	return key
 }
 

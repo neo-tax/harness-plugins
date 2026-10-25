@@ -2,6 +2,8 @@ package claudecode
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -138,13 +140,15 @@ func readTail(ctx Context, path string, c cursor.Cursor, subagentID *string) (ta
 	if err != nil {
 		return out, err
 	}
-	// A transcript shorter than the cursor was rewritten (compaction); read
-	// it again from the start and let the server's idempotency key discard
-	// what it has already seen.
-	if fi.Size() < c.Offset {
+	// A transcript shorter than the cursor, or whose first line changed,
+	// was rewritten (compaction); read it again from the start and let the
+	// server's idempotency key discard what it has already seen.
+	head := firstLineID(f)
+	if fi.Size() < c.Offset || (c.Offset > 0 && c.Head != head) {
 		c = cursor.Cursor{Version: c.Version}
-		out.cursor = c
 	}
+	c.Head = head
+	out.cursor = c
 	if _, err := f.Seek(c.Offset, io.SeekStart); err != nil {
 		return out, err
 	}
@@ -190,6 +194,18 @@ func readTail(ctx Context, path string, c cursor.Cursor, subagentID *string) (ta
 		}
 	}
 	return out, nil
+}
+
+// firstLineID is a short hash of a file's first complete line, or "" when
+// it has none yet.
+func firstLineID(f *os.File) string {
+	r := bufio.NewReader(io.NewSectionReader(f, 0, 1<<20))
+	b, err := r.ReadBytes('\n')
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:8])
 }
 
 // turn builds a session.turn from the first line of an assistant message.
@@ -249,49 +265,45 @@ func subagentID(path string) string {
 	return strings.TrimPrefix(strings.TrimSuffix(filepath.Base(path), ".jsonl"), "agent-")
 }
 
+// Result is what one read of a session's transcripts produced.
+type Result struct {
+	Events []any
+	// ParseFailures counts lines that were not valid JSON, so a harness
+	// format change shows up in diagnostics.
+	ParseFailures int
+	// Commit advances the cursors past what was read. Call it only after
+	// the events are queued.
+	Commit func() error
+}
+
 // TailEvents reads the new tail of a session's main transcript and of each
 // of its subagent transcripts, from their cursors, and returns their events.
-// Subagent turns carry the parent session's id and the subagent's id. The
-// cursors advance only when the returned commit is called, after the caller
-// has queued the events.
+// Subagent turns carry the parent session's id and the subagent's id.
 //
 // @spec: claude-code-transcript-parser#subagent-transcripts-scanned
 // @spec: session-event-wire-contract#subagent-turns-belong-to-parent
-func TailEvents(ctx Context, mainPath string, store *cursor.Store) ([]any, func() error, error) {
-	type pending struct {
-		path string
-		c    cursor.Cursor
-	}
-	var events []any
-	var moves []pending
+func TailEvents(ctx Context, mainPath string, store *cursor.Store) (Result, error) {
+	cursors := store.All()
+	moves := map[string]cursor.Cursor{}
+	var res Result
 	var errs []error
-
-	main, err := readTail(ctx, mainPath, store.Get(mainPath), nil)
-	if err != nil {
-		errs = append(errs, err)
-	} else {
-		events = append(events, main.events...)
-		moves = append(moves, pending{mainPath, main.cursor})
-	}
-	for _, sub := range subagentTranscripts(mainPath) {
-		id := subagentID(sub)
-		t, err := readTail(ctx, sub, store.Get(sub), &id)
+	read := func(path string, sub *string) {
+		t, err := readTail(ctx, path, cursors[path], sub)
 		if err != nil {
 			errs = append(errs, err)
-			continue
+			return
 		}
-		events = append(events, t.events...)
-		moves = append(moves, pending{sub, t.cursor})
+		res.Events = append(res.Events, t.events...)
+		res.ParseFailures += t.failures
+		moves[path] = t.cursor
 	}
-	commit := func() error {
-		for _, m := range moves {
-			if err := store.Put(m.path, m.c); err != nil {
-				return err
-			}
-		}
-		return nil
+	read(mainPath, nil)
+	for _, sub := range subagentTranscripts(mainPath) {
+		id := subagentID(sub)
+		read(sub, &id)
 	}
-	return events, commit, errors.Join(errs...)
+	res.Commit = func() error { return store.Update(moves) }
+	return res, errors.Join(errs...)
 }
 
 // SupportedVersions are the Claude Code versions with a parser fixture under

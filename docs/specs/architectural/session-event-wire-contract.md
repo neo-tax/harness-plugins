@@ -5,7 +5,7 @@ owner:
   - Firas Abuzaid
 created: 2026-10-24
 updated: 2026-10-25
-version: 2
+version: 3
 affects:
   - contract/*.schema.json
   - contract/*.go
@@ -35,7 +35,7 @@ Governs every request and response exchanged between the agent and Neo.Tax: the 
 - `closed-fields`(tested): A `session.closed` event carries `ended_at`, `reason`, and `dropped_events`.
 - `repo-shape`(tested): `repo` is either null or an object of `host`, `owner`, and `name`, each lowercase.
 - `subagent-turns-belong-to-parent`(tested): A turn produced by a subagent carries the parent session's `session_id` and a non-null `subagent_id`; a main-thread turn carries a null `subagent_id`.
-- `idempotency-key`(approved): The server treats two events with the same `device_id`, `session_id`, `event_kind`, and `message_id` as the same event; for kinds without a `message_id`, the key uses the event kind alone within the session.
+- `idempotency-key`(approved): The server treats two events with the same `device_id`, `session_id`, `event_kind`, and `message_id` as the same event; for `session.pr_opened` the key adds `repo` and `number`; for the other kinds without a `message_id`, the key uses the event kind alone within the session.
 - `batched-ingest`(tested): An ingest request carries an ordered array of between 1 and 500 session events.
 - `ingest-response-per-event`(tested): An ingest response reports, for the batch as a whole, how many events were accepted, how many were duplicates, and the index and reason of each event rejected for schema reasons.
 - `schema-rejection-is-partial`(approved): A schema-invalid event in a batch does not cause the server to reject the valid events in the same batch.
@@ -67,5 +67,4 @@ Harness-specific identifiers (`session_id`, `message_id`, `request_id`, `subagen
 
 ## Open Questions
 
-- Whether `session.pr_opened` should join `number` into its idempotency key: as written, a session that opens two pull requests has its second `session.pr_opened` discarded as a duplicate.
 - Whether the ingest response should also return the server's current `contract_version` so an old agent can log that it is behind.

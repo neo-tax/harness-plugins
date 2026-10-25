@@ -38,13 +38,15 @@ func TestAnonymizerStripsContentKeepsStructure(t *testing.T) {
 // except that repository names are placeholders.
 func TestAnonymizedTranscriptParsesTheSame(t *testing.T) {
 	main, sid := copyFixture(t, "testdata/fixtures/synthetic-2.1.310")
-	orig, _, _ := claudecode.TailEvents(fixtureContext(sid), main, cursor.Open(t.TempDir()))
+	origR, _ := claudecode.TailEvents(fixtureContext(sid), main, cursor.Open(t.TempDir()))
+	orig := origR.Events
 
 	src, _ := os.ReadFile(main)
 	var out bytes.Buffer
 	claudecode.NewAnonymizer().Anonymize(bytes.NewReader(src), &out)
 	os.WriteFile(main, out.Bytes(), 0o644)
-	anon, _, _ := claudecode.TailEvents(fixtureContext(sid), main, cursor.Open(t.TempDir()))
+	anonR, _ := claudecode.TailEvents(fixtureContext(sid), main, cursor.Open(t.TempDir()))
+	anon := anonR.Events
 
 	o, a := toLines(t, orig), toLines(t, anon)
 	if len(o) != len(a) {
@@ -79,5 +81,14 @@ func TestRepositoryPlaceholdersAreConsistent(t *testing.T) {
 	}
 	if !strings.Contains(repo(lines[0]), "https://github.com/") {
 		t.Fatalf("host lost: %s", repo(lines[0]))
+	}
+}
+
+func TestPrivateGitHostsArePlaceholders(t *testing.T) {
+	in := `{"type":"pr-link","prNumber":1,"prRepository":"team/app","prUrl":"https://github.acme-corp.com/team/app/pull/1"}` + "\n"
+	var out bytes.Buffer
+	claudecode.NewAnonymizer().Anonymize(strings.NewReader(in), &out)
+	if strings.Contains(out.String(), "acme") || !strings.Contains(out.String(), "git.example.invalid") {
+		t.Fatalf("%s", out.String())
 	}
 }

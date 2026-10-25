@@ -132,5 +132,15 @@ func (a *Anonymizer) prURL(raw string) string {
 	if len(parts) < 4 {
 		return redacted
 	}
-	return fmt.Sprintf("https://%s/%s/pull/%s", u.Hostname(), a.repo(parts[0]+"/"+parts[1]), parts[len(parts)-1])
+	return fmt.Sprintf("https://%s/%s/pull/%s", publicHost(u.Hostname()), a.repo(parts[0]+"/"+parts[1]), parts[len(parts)-1])
+}
+
+// publicHost keeps well-known public git hosts; any other host could name
+// an organization and becomes a placeholder.
+func publicHost(h string) string {
+	switch strings.ToLower(h) {
+	case "github.com", "gitlab.com", "bitbucket.org":
+		return strings.ToLower(h)
+	}
+	return "git.example.invalid"
 }
