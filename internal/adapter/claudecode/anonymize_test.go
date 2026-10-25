@@ -71,16 +71,20 @@ func TestRepositoryPlaceholdersAreConsistent(t *testing.T) {
 	var out bytes.Buffer
 	claudecode.NewAnonymizer().Anonymize(strings.NewReader(in), &out)
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	repo := func(s string) string {
+	type pr struct{ Repo, URL string }
+	parse := func(s string) pr {
 		var m map[string]any
 		json.Unmarshal([]byte(s), &m)
-		return m["prRepository"].(string) + " " + m["prUrl"].(string)
+		return pr{m["prRepository"].(string), m["prUrl"].(string)}
 	}
-	if repo(lines[0])[:10] != repo(lines[1])[:10] || strings.Split(repo(lines[0]), " ")[0] == strings.Split(repo(lines[2]), " ")[0] {
-		t.Fatalf("%s | %s | %s", repo(lines[0]), repo(lines[1]), repo(lines[2]))
+	a, b, c := parse(lines[0]), parse(lines[1]), parse(lines[2])
+	if a.Repo != b.Repo || a.Repo == c.Repo {
+		t.Fatalf("placeholders %q %q %q", a.Repo, b.Repo, c.Repo)
 	}
-	if !strings.Contains(repo(lines[0]), "https://github.com/") {
-		t.Fatalf("host lost: %s", repo(lines[0]))
+	for _, p := range []pr{a, b, c} {
+		if !strings.HasPrefix(p.URL, "https://github.com/"+p.Repo+"/pull/") {
+			t.Errorf("url %q does not match repo %q", p.URL, p.Repo)
+		}
 	}
 }
 
