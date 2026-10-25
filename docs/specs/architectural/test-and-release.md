@@ -4,9 +4,11 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-10-24
-updated: 2026-10-24
+updated: 2026-10-25
 version: 1
-affects: []
+affects:
+  - internal/fakeingest/*.go
+  - .github/workflows/ci.yml
 ---
 
 # Test and release
@@ -21,7 +23,7 @@ Governs how the agent and plugins are tested, how a release is cut, and what art
 - `unit-coverage`(approved): The parser, repository normalization, queue, backoff, and allowlist each have unit tests covering every requirement in their spec that can be exercised without a network.
 - `contract-test`(approved): A test validates every event the agent can emit against the schema documents in this repository.
 - `end-to-end-against-fake-ingest`(approved): A test execs the agent in the exact shape a harness hook does, with the hook name on the command line and a payload on standard input, against the fake ingest server, and asserts the recorded events.
-- `fake-ingest-fault-modes`(approved): The fake ingest server can be instructed to return a schema rejection, an authentication rejection, a server error, or to stall, so the queue's failure paths are tested end to end.
+- `fake-ingest-fault-modes`(tested): The fake ingest server can be instructed to return a schema rejection, an authentication rejection, a server error, or to stall, so the queue's failure paths are tested end to end.
 - `plugin-validate-in-ci`(approved): CI runs the harness's plugin validation command against the marketplace manifest and every plugin directory.
 - `install-smoke-test`(approved): CI installs the plugin from the repository into a throwaway harness configuration directory, runs one non-interactive prompt with hooks pointed at the fake ingest server, and asserts one `session.opened`, one `session.turn`, and one `session.closed` arrived.
 - `release-on-tag`(approved): Pushing a semantic-version tag triggers the release workflow; nothing else publishes a release.
