@@ -6,7 +6,13 @@ Neo.Tax uses the reported sessions to attribute AI token spend to the pull reque
 
 ## Status
 
-Design complete, implementation not started. This repository currently holds the glossary and the architectural specs; the agent, contract schemas, adapters, and plugin manifests are built against those specs.
+v0.1 implemented, not yet released. The agent (`cmd/neo-tax-agent`), the wire contract (`contract/`), the Claude Code adapter (`internal/adapter/claudecode`), the plugin (`plugins/claude-code`), and the fake ingest server (`cmd/fake-ingest`) are built against the specs; each requirement's status is in its spec.
+
+```
+go test ./...                       # unit, contract, fixture, end-to-end, and spec-traceability tests
+go run ./cmd/fake-ingest -record -  # see exactly what the plugin sends
+go run ./cmd/privacy-statement      # the privacy statement, generated from the field allowlist
+```
 
 ## What ships
 

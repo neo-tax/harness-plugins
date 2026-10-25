@@ -11,7 +11,12 @@
   "plugins": [
     {
       "name": "neo-tax",
-      "source": "./plugins/claude-code",
+      "source": {
+        "source": "git-subdir",
+        "url": "neo-tax/harness-plugins",
+        "path": "plugins/claude-code",
+        "ref": "v0.1.0"
+      },
       "description": "Reports Claude Code session metadata (token usage, model, repository, branch) to Neo.Tax. No prompts, code, or file paths leave the machine.",
       "version": "0.1.0"
     }

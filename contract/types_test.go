@@ -40,6 +40,7 @@ func typedEvents() []any {
 }
 
 // @spec: session-event-wire-contract#schema-is-source-of-truth
+// @spec: test-and-release#contract-test
 func TestTypedEventsValidateAgainstSchema(t *testing.T) {
 	for _, ev := range typedEvents() {
 		if err := contract.ValidateEvent(marshal(t, ev)); err != nil {
@@ -51,6 +52,10 @@ func TestTypedEventsValidateAgainstSchema(t *testing.T) {
 // The Go types must carry exactly the properties the schema defines for each
 // event kind, so neither side can drift from the other.
 // @spec: session-event-wire-contract#schema-is-source-of-truth
+// @spec: session-event-wire-contract#opened-fields
+// @spec: session-event-wire-contract#turn-fields
+// @spec: session-event-wire-contract#pr-opened-fields
+// @spec: session-event-wire-contract#closed-fields
 func TestTypedFieldsMatchSchemaProperties(t *testing.T) {
 	for kind, fields := range contract.SchemaFields() {
 		var ev any
@@ -95,6 +100,9 @@ func TestFourSchemaDocuments(t *testing.T) {
 	}
 }
 
+// @spec: session-event-wire-contract#enrollment-request
+// @spec: session-event-wire-contract#enrollment-response
+// @spec: session-event-wire-contract#ingest-response-per-event
 func TestEnrollmentAndIngestShapes(t *testing.T) {
 	req := contract.EnrollmentRequest{
 		ContractVersion: contract.Version, EnrollmentToken: "et_1", Email: "e@example.com",

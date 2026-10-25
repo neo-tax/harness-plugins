@@ -1,0 +1,155 @@
+# The only workflow that publishes a release: it runs when a semantic-version
+# tag is pushed.
+#
+# @spec: test-and-release#release-on-tag
+name: Release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      major: ${{ steps.v.outputs.major }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # @spec: test-and-release#manifest-version-matches-tag
+      # @spec: test-and-release#marketplace-source-is-this-repo
+      - run: go run ./cmd/release-check "$GITHUB_REF_NAME"
+      - run: go test ./...
+      - id: v
+        run: |
+          v=${GITHUB_REF_NAME#v}
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "major=${v%%.*}" >> "$GITHUB_OUTPUT"
+
+  # @spec: test-and-release#release-targets
+  build:
+    needs: check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [darwin/arm64, darwin/amd64, linux/amd64, linux/arm64, windows/amd64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build agent and fake ingest
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          goos=${TARGET%/*}; goarch=${TARGET#*/}; ext=""
+          [ "$goos" = windows ] && ext=.exe
+          mkdir -p dist
+          for cmd in neo-tax-agent fake-ingest; do
+            GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build -trimpath \
+              -ldflags "-s -w -X main.Version=$VERSION" \
+              -o "dist/${cmd}_${goos}_${goarch}${ext}" "./cmd/$cmd"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ strategy.job-index }}
+          path: dist/*
+
+  # v0.x binaries ship unsigned. From v1.0 macOS binaries are signed and
+  # notarized and Windows binaries are signed before they are attached.
+  # @spec: test-and-release#unsigned-binaries-v0-1
+  # @spec: test-and-release#signing-v1-0
+  sign-macos:
+    needs: [check, build]
+    if: needs.check.outputs.major >= 1
+    runs-on: macos-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Sign and notarize
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER }}
+        run: |
+          kc=build.keychain
+          security create-keychain -p ci "$kc"
+          security default-keychain -s "$kc"
+          security unlock-keychain -p ci "$kc"
+          echo "$CERT_P12" | base64 --decode > cert.p12
+          security import cert.p12 -k "$kc" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci "$kc"
+          echo "$NOTARY_KEY" > notary.p8
+          for f in dist/*_darwin_*; do
+            codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$f"
+            zip -j "$f.zip" "$f"
+            xcrun notarytool submit "$f.zip" --key notary.p8 --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" --wait
+            rm "$f.zip"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed-darwin
+          path: dist/*_darwin_*
+
+  sign-windows:
+    needs: [check, build]
+    if: needs.check.outputs.major >= 1
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: azure/trusted-signing-action@v0.5.1
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE }}
+          files-folder: dist
+          files-folder-filter: exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed-windows
+          path: dist/*_windows_*
+
+  # @spec: test-and-release#release-attaches-binaries
+  # @spec: test-and-release#fake-ingest-is-released
+  publish:
+    needs: [check, build, sign-macos, sign-windows]
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*
+          path: dist
+          merge-multiple: true
+      - name: Use signed binaries (v1.0 and later)
+        if: needs.check.outputs.major >= 1
+        uses: actions/download-artifact@v4
+        with:
+          pattern: signed-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > checksums.txt
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes
