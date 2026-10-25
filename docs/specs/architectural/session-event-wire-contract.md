@@ -34,14 +34,14 @@ Governs every request and response exchanged between the agent and Neo.Tax: the 
 - `closed-fields`(tested): A `session.closed` event carries `ended_at`, `reason`, and `dropped_events`.
 - `repo-shape`(tested): `repo` is either null or an object of `host`, `owner`, and `name`, each lowercase.
 - `subagent-turns-belong-to-parent`(approved): A turn produced by a subagent carries the parent session's `session_id` and a non-null `subagent_id`; a main-thread turn carries a null `subagent_id`.
-- `idempotency-key`(tested): The server treats two events with the same `device_id`, `session_id`, `event_kind`, and `message_id` as the same event; for kinds without a `message_id`, the key uses the event kind alone within the session.
+- `idempotency-key`(approved): The server treats two events with the same `device_id`, `session_id`, `event_kind`, and `message_id` as the same event; for kinds without a `message_id`, the key uses the event kind alone within the session.
 - `batched-ingest`(tested): An ingest request carries an ordered array of between 1 and 500 session events.
 - `ingest-response-per-event`(tested): An ingest response reports, for the batch as a whole, how many events were accepted, how many were duplicates, and the index and reason of each event rejected for schema reasons.
-- `schema-rejection-is-partial`(tested): A schema-invalid event in a batch does not cause the server to reject the valid events in the same batch.
+- `schema-rejection-is-partial`(approved): A schema-invalid event in a batch does not cause the server to reject the valid events in the same batch.
 - `enrollment-request`(tested): An enrollment request carries the enrollment token, the confirmed email, `email_confirmed_by`, a device description (hostname, OS, architecture, harness, harness version, agent version), and `contract_version`.
 - `enrollment-response`(tested): A successful enrollment response carries `device_id`, the device key, and the ingest base URL the device is to use.
 - `email-confirmed-by-values`(tested): `email_confirmed_by` is one of `engineer` or `auto`.
-- `auth-errors-are-distinct`(tested): The server distinguishes an invalid or revoked device key (401), a device key that is valid but not permitted to ingest (403), and a schema failure (422) by status code, because the agent reacts to each differently.
+- `auth-errors-are-distinct`(approved): The server distinguishes an invalid or revoked device key (401), a device key that is valid but not permitted to ingest (403), and a schema failure (422) by status code, because the agent reacts to each differently.
 - `platform-vendors-pinned-copy`(approved): Neo.Tax's server validates incoming requests against a vendored copy of these schemas, and a CI check in that repository fails when the copy differs from the tagged release it pins.
 - `fake-ingest-validates-same-schemas`(tested): The fake ingest server validates requests against the schema documents in this repository, not against a separate copy.
 

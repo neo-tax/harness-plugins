@@ -217,12 +217,16 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 	key, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	s.mu.Lock()
 	d := s.byKey[key]
+	var revoked, forbidden bool
+	if d != nil {
+		revoked, forbidden = d.revoked, d.forbidden
+	}
 	s.mu.Unlock()
-	if d == nil || d.revoked {
+	if d == nil || revoked {
 		writeError(w, http.StatusUnauthorized, "invalid or revoked device key")
 		return
 	}
-	if d.forbidden {
+	if forbidden {
 		writeError(w, http.StatusForbidden, "device key not permitted to ingest")
 		return
 	}
@@ -253,6 +257,10 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 		}
 		var ev map[string]any
 		json.Unmarshal(raw, &ev)
+		if v, _ := ev["contract_version"].(string); !slices.Contains(contract.AcceptedVersions, v) {
+			resp.Rejected = append(resp.Rejected, contract.Rejection{Index: i, Reason: fmt.Sprintf("unsupported contract_version %q", v)})
+			continue
+		}
 		if ev["device_id"] != d.ID {
 			resp.Rejected = append(resp.Rejected, contract.Rejection{Index: i, Reason: "device_id does not match the device key"})
 			continue

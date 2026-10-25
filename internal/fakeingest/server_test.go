@@ -259,3 +259,15 @@ func TestUnknownFaultModeRejected(t *testing.T) {
 		t.Fatalf("status %d", resp.StatusCode)
 	}
 }
+
+// @spec: session-event-wire-contract#contract-version-on-every-request
+func TestEventWithUnacceptedContractVersionRejected(t *testing.T) {
+	h := start(t, fakeingest.Options{})
+	er := h.enroll()
+	old := turn(er.DeviceID, "m1")
+	old.ContractVersion = "999"
+	_, ir, _ := h.ingest(er.DeviceKey, old, turn(er.DeviceID, "m2"))
+	if ir.Accepted != 1 || len(ir.Rejected) != 1 || ir.Rejected[0].Index != 0 {
+		t.Fatalf("response %+v", ir)
+	}
+}
