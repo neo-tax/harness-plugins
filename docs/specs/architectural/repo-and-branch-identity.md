@@ -25,8 +25,10 @@ Governs how the agent derives the `repo`, `branch`, and `head_sha` fields from t
 - `branch-exact`(tested): `branch` is the current branch name with case preserved, and is null on a detached HEAD.
 - `head-sha`(tested): `head_sha` is the full commit hash HEAD points at.
 - `worktree-resolves-to-main-repo`(tested): A working directory inside a linked git worktree resolves to the same `repo` as the main checkout.
-- `single-git-invocation`(tested): The agent obtains all three values with one git process invocation per hook.
-- `git-failure-is-null`(tested): When git is absent or the invocation fails, all three fields are null and the event is still emitted.
+- `single-git-invocation`(built): The agent obtains all three values with one git process invocation per hook.
+  - status-reason: Identify runs one git process and a test proves it; the per-hook claim is covered once hooks call it (PLAT-673)
+- `git-failure-is-null`(built): When git is absent or the invocation fails, all three fields are null and the event is still emitted.
+  - status-reason: Identify returns all-null on git failure and a test proves it; that the event is still emitted is covered once hooks call it (PLAT-673)
 - `cwd-never-sent`(tested): The working-directory path itself is never included in any event.
 
 ## Design Notes
@@ -40,4 +42,5 @@ Branch case is preserved because git branch names are case-sensitive; the server
 ## Risks
 
 - **A repository with no remote.** `repo` is null and sessions cannot be joined to a PR. Accepted; the session still counts toward the device and shows as unmatched.
+- **Remote URLs rewritten by `url.<base>.insteadOf` or set in an included config file.** The agent reads only the repository's own config and does not apply git's rewriting, so an alias such as `gh:owner/repo` yields a null `repo` (a host with no dot is treated as an alias) rather than a wrong one. Accepted for v0.1.
 - **Forks whose `origin` is the fork.** `repo` names the fork, not the upstream the PR targets. Accepted for v0.1; the server can match on `head_sha` and the PR's head repository.

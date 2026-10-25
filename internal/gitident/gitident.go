@@ -45,19 +45,26 @@ type Identity struct {
 func Identify(dir string) Identity {
 	ctx, cancel := context.WithTimeout(context.Background(), Timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, GitCommand, "-C", dir, "rev-parse",
-		"HEAD", "--path-format=absolute", "--git-common-dir", "--symbolic-full-name", "HEAD")
+	// Output order: git dir, common dir, HEAD's sha, HEAD's symbolic ref. On
+	// an unborn branch git prints the two directories (and, depending on the
+	// version, an unresolved "HEAD") and exits non-zero; the branch is then
+	// read from the HEAD file itself.
+	cmd := exec.CommandContext(ctx, GitCommand, "-C", dir, "rev-parse", "--path-format=absolute",
+		"--git-dir", "--git-common-dir", "HEAD", "--symbolic-full-name", "HEAD")
 	// A harness or git hook may export these; they would override -C.
 	cmd.Env = withoutEnv(os.Environ(), "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE")
 	out, err := cmd.Output()
-	if err != nil {
-		return Identity{}
-	}
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(lines) != 3 {
+	var gitDir, commonDir, sha, ref string
+	switch {
+	case err == nil && len(lines) == 4:
+		gitDir, commonDir, sha, ref = lines[0], lines[1], lines[2], lines[3]
+	case isExitError(err) && ctx.Err() == nil && len(lines) >= 2 && len(lines) <= 3 && filepath.IsAbs(lines[0]) && filepath.IsAbs(lines[1]):
+		gitDir, commonDir = lines[0], lines[1]
+		ref = unbornRef(gitDir)
+	default:
 		return Identity{}
 	}
-	sha, commonDir, ref := lines[0], lines[1], lines[2]
 
 	var id Identity
 	// @spec: repo-and-branch-identity#head-sha
@@ -71,6 +78,21 @@ func Identify(dir string) Identity {
 	cfg := readConfig(filepath.Join(commonDir, "config"))
 	id.Repo = ParseRemoteURL(cfg.remoteURL(id.Branch))
 	return id
+}
+
+func isExitError(err error) bool {
+	_, ok := err.(*exec.ExitError)
+	return ok
+}
+
+// unbornRef reads the ref an unborn HEAD points at, such as refs/heads/main.
+func unbornRef(gitDir string) string {
+	b, err := os.ReadFile(filepath.Join(gitDir, "HEAD"))
+	if err != nil {
+		return ""
+	}
+	ref, _ := strings.CutPrefix(strings.TrimSpace(string(b)), "ref: ")
+	return ref
 }
 
 func isHexSHA(s string) bool {
@@ -201,7 +223,10 @@ func ParseRemoteURL(raw string) *contract.Repo {
 	}
 	path = strings.TrimSuffix(strings.Trim(path, "/"), ".git")
 	segments := strings.Split(path, "/")
-	if host == "" || len(segments) < 2 {
+	// A host with no dot is an insteadOf alias (gh:owner/repo) or a local
+	// name; without git's URL rewriting it would yield a wrong identity, so
+	// it yields none.
+	if !strings.Contains(host, ".") || len(segments) < 2 {
 		return nil
 	}
 	name := segments[len(segments)-1]

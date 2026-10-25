@@ -37,6 +37,7 @@ func TestParseRemoteURL(t *testing.T) {
 		`C:\Users\someone\repo`:                                                nil,
 		"C:/Users/someone/repo":                                                nil,
 		"../sibling":                                                           nil,
+		"gh:neo-tax/harness-plugins":                                           nil, // an insteadOf alias, not a host
 		"https://github.com/onlyowner":                                         nil,
 		"":                                                                     nil,
 	}
@@ -203,5 +204,18 @@ func TestGitFailureIsNull(t *testing.T) {
 	gitident.GitCommand = filepath.Join(t.TempDir(), "no-such-git")
 	if id := gitident.Identify(dir); id.Repo != nil || id.Branch != nil || id.HeadSHA != nil {
 		t.Fatalf("%+v", id)
+	}
+}
+
+// A repository with no commits yet still has a branch and a remote.
+// @spec: repo-and-branch-identity#repo-null-outside-git
+// @spec: repo-and-branch-identity#branch-exact
+func TestUnbornBranchKeepsRepoAndBranch(t *testing.T) {
+	dir := t.TempDir()
+	git(t, dir, "init", "-q", "-b", "First")
+	git(t, dir, "remote", "add", "origin", "git@github.com:neo-tax/empty.git")
+	id := gitident.Identify(dir)
+	if id.Repo == nil || id.Repo.Name != "empty" || str(id.Branch) != "First" || id.HeadSHA != nil {
+		t.Fatalf("%+v branch %s head %s", id.Repo, str(id.Branch), str(id.HeadSHA))
 	}
 }
