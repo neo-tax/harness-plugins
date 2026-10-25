@@ -11,6 +11,8 @@ affects:
   - contract/types.go
   - cmd/privacy-statement/*.go
   - PRIVACY.md
+  - internal/agent/*.go
+  - internal/queue/*.go
 ---
 
 # Field allowlist
@@ -21,8 +23,8 @@ Governs the single list of fields the agent is permitted to emit, how it is enfo
 
 - `one-allowlist`(tested): The agent holds exactly one allowlist, keyed by event kind, listing every field that event kind may carry.
 - `allowlist-matches-contract`(tested): The allowlist names exactly the fields the wire contract schema permits for each event kind, and a test fails when they differ.
-- `enforced-below-adapters`(approved): The allowlist is applied by the shared agent after an adapter produces an event and before the event is queued, so no adapter can add a field.
-- `unknown-field-dropped-and-counted`(approved): A field not on the allowlist is removed before queuing and the removal is counted in the agent's local diagnostics.
+- `enforced-below-adapters`(tested): The allowlist is applied by the shared agent after an adapter produces an event and before the event is queued, so no adapter can add a field.
+- `unknown-field-dropped-and-counted`(tested): A field not on the allowlist is removed before queuing and the removal is counted in the agent's local diagnostics.
 - `cwd-excluded`(tested): The working-directory path is not on the allowlist for any event kind.
 - `title-excluded`(tested): A harness-generated session title or slug is not on the allowlist for any event kind.
 - `content-excluded`(tested): Prompt text, completion text, tool inputs, tool outputs, and file paths are not on the allowlist for any event kind.
