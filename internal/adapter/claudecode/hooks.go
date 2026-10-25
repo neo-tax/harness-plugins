@@ -125,15 +125,25 @@ func emit(a *agent.Agent, name string, p payload, o HookOptions) error {
 	ctx := Context{DeviceID: dev.DeviceID, AgentVersion: o.AgentVersion, SessionID: p.SessionID, Now: o.Now(), Git: git}
 
 	// The cursor lock serializes transcript reads and the dropped count.
-	// When another hook holds it too long, the transcript tail waits for the
-	// next hook, but opened and closed are still emitted, carrying no count.
+	// When another hook holds it too long, opened and closed are still
+	// emitted, carrying no count. A skipped Stop or PreCompact tail is read
+	// by the session's next hook; SessionEnd has no next hook, so it waits
+	// three times as long, and a tail it still skips is recovered only by a
+	// backfill.
 	store := cursor.Open(o.DataDir)
-	unlock, lockErr := store.LockWithin(CursorWait)
+	wait := CursorWait
+	if name == "SessionEnd" {
+		wait *= 3
+	}
+	unlock, lockErr := store.LockWithin(wait)
 	locked := lockErr == nil
-	if locked {
+	switch {
+	case locked:
 		defer unlock()
-	} else {
-		agent.Logf(o.DataDir, "hook=%s cursor lock busy; transcript tail deferred", name)
+	case name == "SessionEnd":
+		agent.Logf(o.DataDir, "hook=%s cursor lock busy; final transcript tail skipped until a backfill", name)
+	default:
+		agent.Logf(o.DataDir, "hook=%s cursor lock busy; transcript tail deferred to the next hook", name)
 	}
 
 	var events []any
