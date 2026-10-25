@@ -34,7 +34,10 @@ func loadSpecs(t *testing.T) (map[string]requirement, map[string][]string) {
 	}
 	for _, p := range paths {
 		id := strings.TrimSuffix(filepath.Base(p), ".md")
-		b, _ := os.ReadFile(p)
+		b, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
 		lines := strings.Split(string(b), "\n")
 		inAffects := false
 		for i, l := range lines {
@@ -61,7 +64,7 @@ func loadSpecs(t *testing.T) (map[string]requirement, map[string][]string) {
 // tags maps "spec#slug" to the files tagging it, split by test and non-test.
 func tags(t *testing.T) (tests, code map[string][]string) {
 	tests, code = map[string][]string{}, map[string][]string{}
-	filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -88,8 +91,11 @@ func tags(t *testing.T) (tests, code map[string][]string) {
 				}
 			}
 		}
-		return nil
+		return sc.Err()
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	return tests, code
 }
 
