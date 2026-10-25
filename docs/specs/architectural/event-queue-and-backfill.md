@@ -28,7 +28,8 @@ Governs how the agent stores session events on disk between hooks, flushes them 
 - `backoff-persisted`(tested): After a failed flush the agent records a next-attempt time, starting at 30 seconds and doubling to a ceiling of 1 hour, and no hook flushes before that time.
 - `backoff-resets-on-success`(tested): A successful flush resets the backoff.
 - `schema-rejection-dead-letters`(tested): Events the server rejects for schema reasons are moved to a dead-letter directory with the server's reason, and the remaining events continue.
-- `dead-letter-retention`(tested): Dead-letter files older than 14 days are deleted at the next hook.
+- `dead-letter-retention`(built): Dead-letter files older than 14 days are deleted at the next hook.
+  - status-reason: PruneDeadLetters deletes files older than 14 days (tested); calling it on every hook lands with the hook dispatch in PLAT-673
 - `auth-rejection-stops-flushing`(tested): A 401 or 403 marks the device as needing re-enrollment; events keep queuing, and no flush is attempted until enrollment succeeds.
 - `server-and-network-errors-back-off`(tested): A 5xx response or a network error triggers backoff and leaves the batch in place.
 - `queue-cap`(tested): The queue is capped at 50 MB; when exceeded, the oldest segment is deleted.

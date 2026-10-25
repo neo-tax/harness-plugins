@@ -29,9 +29,6 @@ func (e *StatusError) IsAuth() bool {
 	return e.Code == http.StatusUnauthorized || e.Code == http.StatusForbidden
 }
 
-// IsSchema reports whether the request as a whole failed schema validation.
-func (e *StatusError) IsSchema() bool { return e.Code == http.StatusUnprocessableEntity }
-
 // Client sends batches of session events with a device key.
 type Client struct {
 	HTTP      *http.Client

@@ -381,15 +381,10 @@ func (q *Queue) Flush(ctx context.Context, s Sender) (FlushResult, error) {
 		case errors.As(err, &se) && se.IsAuth():
 			res.NeedsEnrollment = true
 			return res, q.withState(func(st *State) error { st.NeedsEnrollment = true; return nil })
-		case errors.As(err, &se) && se.IsSchema():
-			for _, p := range batch {
-				if err := q.deadLetter(p.raw, se.Message); err != nil {
-					return res, err
-				}
-			}
-			res.Sent += len(batch)
-			res.DeadLettered += len(batch)
 		default:
+			// A request-level 422 is grouped here too: individual events are
+			// rejected in the response body, so a whole-request rejection is
+			// systemic and would recur for every batch.
 			// @spec: event-queue-and-backfill#server-and-network-errors-back-off
 			res.Failed = true
 			return res, q.backOff()

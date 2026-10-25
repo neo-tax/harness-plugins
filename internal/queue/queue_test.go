@@ -478,3 +478,25 @@ func TestPartialTrailingLineDoesNotSwallowNextEvent(t *testing.T) {
 		t.Fatalf("%+v", res)
 	}
 }
+
+type rejectRequest struct{ calls int }
+
+func (r *rejectRequest) Send(context.Context, []json.RawMessage) (contract.IngestResponse, error) {
+	r.calls++
+	return contract.IngestResponse{}, &ingest.StatusError{Code: http.StatusUnprocessableEntity, Message: "events: maxItems"}
+}
+
+// A request-level 422 is a property of the request, not of its events:
+// nothing is dead-lettered and the flush backs off.
+func TestRequestLevelSchemaRejectionBacksOff(t *testing.T) {
+	e := setup(t)
+	e.appendN("a", 3)
+	s := &rejectRequest{}
+	res, err := e.q.Flush(context.Background(), s)
+	if err != nil || !res.Failed || res.DeadLettered != 0 || s.calls != 1 {
+		t.Fatalf("%+v %v calls=%d", res, err, s.calls)
+	}
+	if lineCount(t, e.files("queue", "*.jsonl")) != 3 || len(e.files("deadletter", "*")) != 0 {
+		t.Fatal("events moved")
+	}
+}
