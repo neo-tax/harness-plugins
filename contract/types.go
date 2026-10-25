@@ -226,6 +226,8 @@ func SchemaFields() map[string][]string {
 // ObjectFields returns the sorted property names of the object the session
 // event schema permits as field on events of kind, following $ref and looking
 // through a nullable oneOf. It returns nil when the field is not an object.
+//
+// @spec: field-allowlist#allowlist-matches-contract
 func ObjectFields(kind, field string) []string {
 	b, err := schemaFS.ReadFile(SessionEventSchema)
 	if err != nil {

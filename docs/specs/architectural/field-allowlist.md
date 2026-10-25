@@ -8,6 +8,7 @@ updated: 2026-10-25
 version: 1
 affects:
   - internal/allowlist/*.go
+  - contract/types.go
   - cmd/privacy-statement/*.go
   - PRIVACY.md
 ---
