@@ -43,4 +43,5 @@ Branch case is preserved because git branch names are case-sensitive; the server
 
 - **A repository with no remote.** `repo` is null and sessions cannot be joined to a PR. Accepted; the session still counts toward the device and shows as unmatched.
 - **Remote URLs rewritten by `url.<base>.insteadOf` or set in an included config file.** The agent reads only the repository's own config and does not apply git's rewriting, so an alias such as `gh:owner/repo` yields a null `repo` (an scp-style host with no dot is treated as an alias) rather than a wrong one. Accepted for v0.1.
+- **A reftable repository with no commits yet.** `branch` is null rather than the branch name, because an unborn HEAD is read from the HEAD file and reftable keeps only a placeholder there. Accepted; the first commit fixes it.
 - **Forks whose `origin` is the fork.** `repo` names the fork, not the upstream the PR targets. Accepted for v0.1; the server can match on `head_sha` and the PR's head repository.
