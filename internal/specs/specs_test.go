@@ -61,7 +61,8 @@ func loadSpecs(t *testing.T) (map[string]requirement, map[string][]string) {
 	return reqs, affects
 }
 
-// tags maps "spec#slug" to the files tagging it, split by test and non-test.
+// tags maps "spec#slug" to the files tagging it, split by test (Go tests and
+// scripts/*-test.sh, which CI runs) and non-test.
 func tags(t *testing.T) (tests, code map[string][]string) {
 	tests, code = map[string][]string{}, map[string][]string{}
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
@@ -84,7 +85,7 @@ func tags(t *testing.T) (tests, code map[string][]string) {
 		for sc.Scan() {
 			for _, m := range tagLine.FindAllStringSubmatch(sc.Text(), -1) {
 				key := m[1] + "#" + m[2]
-				if strings.HasSuffix(p, "_test.go") {
+				if strings.HasSuffix(p, "_test.go") || strings.HasSuffix(p, "-test.sh") {
 					tests[key] = append(tests[key], p)
 				} else {
 					code[key] = append(code[key], p)

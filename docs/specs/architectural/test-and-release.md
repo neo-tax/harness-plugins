@@ -37,8 +37,7 @@ Governs how the agent and plugins are tested, how a release is cut, and what art
 - `fake-ingest-fault-modes`(tested): The fake ingest server can be instructed to return a schema rejection, an authentication rejection, a server error, or to stall, so the queue's failure paths are tested end to end.
 - `plugin-validate-in-ci`(built): CI runs the harness's plugin validation command against the marketplace manifest and every plugin directory.
   - status-reason: a CI job (plugin-validate in .github/workflows/ci.yml); it is not a Go test
-- `install-smoke-test`(built): CI installs the plugin from the repository into a throwaway harness configuration directory, runs one non-interactive prompt with hooks pointed at the fake ingest server, and asserts one `session.opened`, one `session.turn`, and one `session.closed` arrived.
-  - status-reason: scripts/smoke-test.sh runs in CI when the ANTHROPIC_API_KEY secret is set; install and enrollment were verified locally with SMOKE_SKIP_PROMPT=1, the prompt step has not run yet
+- `install-smoke-test`(tested): CI installs the plugin from the repository into a throwaway harness configuration directory, runs one non-interactive prompt with hooks pointed at the fake ingest server, and asserts one `session.opened`, one `session.turn`, and one `session.closed` arrived.
 - `release-on-tag`(built): Pushing a semantic-version tag triggers the release workflow; nothing else publishes a release.
   - status-reason: the release workflow triggers only on v*.*.* tags; exercised by the first release, not by a test
 - `release-targets`(built): A release builds the agent for darwin/arm64, darwin/amd64, linux/amd64, linux/arm64, and windows/amd64.
