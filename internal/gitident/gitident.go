@@ -46,6 +46,12 @@ func Identify(dir string) Identity {
 	if !filepath.IsAbs(dir) {
 		return Identity{}
 	}
+	// git reports relative paths against its physical working directory, so
+	// they are joined onto the resolved dir, not the logical one.
+	dir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return Identity{}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), Timeout)
 	defer cancel()
 	// Output order: git dir, common dir, HEAD's sha, HEAD's symbolic ref. On

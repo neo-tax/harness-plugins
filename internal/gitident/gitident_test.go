@@ -237,3 +237,17 @@ func TestUnbornBranchUnderReftableIsNotPlaceholder(t *testing.T) {
 		t.Fatalf("branch %q", *b)
 	}
 }
+
+// A session directory reached through a symlink resolves to the repository
+// the link points into, whatever the depth of its target.
+func TestSymlinkedSubdirectoryResolves(t *testing.T) {
+	dir := newRepo(t)
+	git(t, dir, "remote", "add", "origin", "https://github.com/neo-tax/harness-plugins.git")
+	os.MkdirAll(filepath.Join(dir, "a", "b", "c"), 0o755)
+	if err := os.Symlink(filepath.Join("a", "b", "c"), filepath.Join(dir, "l")); err != nil {
+		t.Skip(err)
+	}
+	if id := gitident.Identify(filepath.Join(dir, "l")); id.Repo == nil || id.Repo.Name != "harness-plugins" {
+		t.Fatalf("%+v", id.Repo)
+	}
+}
