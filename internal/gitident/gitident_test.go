@@ -415,3 +415,33 @@ func TestRemoteFromIncludedConfig(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+func TestConditionalIncludeKinds(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := filepath.Join(home, "Work")
+	dir := filepath.Join(work, "repo")
+	os.MkdirAll(dir, 0o755)
+	git(t, dir, "init", "-q", "-b", "main")
+	git(t, dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "x")
+	cfg := t.TempDir()
+	os.WriteFile(filepath.Join(cfg, "a.inc"), []byte("[user]\n\temail = matched@example.com\n"), 0o600)
+	global := filepath.Join(cfg, "gitconfig")
+	t.Setenv("GIT_CONFIG_GLOBAL", global)
+	check := func(name, cond, want string) {
+		t.Helper()
+		os.WriteFile(global, []byte("[user]\n\temail = default@example.com\n[includeIf \""+cond+"\"]\n\tpath = a.inc\n"), 0o600)
+		if got := str(gitident.Identify(dir).UserEmail); got != want {
+			t.Errorf("%s (%s): got %s, want %s", name, cond, got, want)
+		}
+	}
+	check("onbranch other", "onbranch:feature/", "default@example.com")
+	git(t, dir, "checkout", "-q", "-b", "feature/x")
+	check("onbranch prefix", "onbranch:feature/", "matched@example.com")
+	git(t, dir, "checkout", "-q", "--detach")
+	check("onbranch detached", "onbranch:feature/", "default@example.com")
+	check("gitdir/i case", "gitdir/i:"+strings.ToUpper(work)+"/", "matched@example.com")
+	check("gitdir case-sensitive", "gitdir:"+strings.ToUpper(work)+"/", "default@example.com")
+	check("gitdir home", "gitdir:~/Work/", "matched@example.com")
+	check("gitdir bare name", "gitdir:repo/.git", "matched@example.com")
+}
