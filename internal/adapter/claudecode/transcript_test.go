@@ -303,3 +303,20 @@ func TestCommitPrunesVanishedTranscripts(t *testing.T) {
 		t.Fatalf("stale cursor kept: %s", b)
 	}
 }
+
+// Rewrite detection works when the first line is very long.
+func TestRewriteDetectedWithLongFirstLine(t *testing.T) {
+	main, sid := copyFixture(t, "testdata/fixtures/synthetic-2.1.310")
+	b, _ := os.ReadFile(main)
+	long := `{"type":"user","message":{"content":"` + strings.Repeat("a", 2<<20) + `"}}` + "\n"
+	os.WriteFile(main, append([]byte(long), b...), 0o644)
+	store := cursor.Open(t.TempDir())
+	r, _ := claudecode.TailEvents(fixtureContext(sid), main, store)
+	r.Commit()
+	other := `{"type":"user","message":{"content":"` + strings.Repeat("b", 2<<20) + `"}}` + "\n"
+	os.WriteFile(main, append([]byte(other), b...), 0o644)
+	again, _ := claudecode.TailEvents(fixtureContext(sid), main, store)
+	if len(again.Events) != 4 {
+		t.Fatalf("%d events", len(again.Events))
+	}
+}

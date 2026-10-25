@@ -2,6 +2,7 @@ package claudecode
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -196,15 +197,18 @@ func readTail(ctx Context, path string, c cursor.Cursor, subagentID *string) (ta
 	return out, nil
 }
 
-// firstLineID is a short hash of a file's first complete line, or "" when
-// it has none yet.
+// firstLineID is a short hash of a file's first line, capped at its first
+// 4 KB, or "" when the file has neither a complete first line nor 4 KB.
 func firstLineID(f *os.File) string {
-	r := bufio.NewReader(io.NewSectionReader(f, 0, 1<<20))
-	b, err := r.ReadBytes('\n')
-	if err != nil {
+	buf := make([]byte, 4<<10)
+	n, _ := io.ReadFull(io.NewSectionReader(f, 0, int64(len(buf))), buf)
+	buf = buf[:n]
+	if i := bytes.IndexByte(buf, '\n'); i >= 0 {
+		buf = buf[:i+1]
+	} else if n < cap(buf) {
 		return ""
 	}
-	sum := sha256.Sum256(b)
+	sum := sha256.Sum256(buf)
 	return hex.EncodeToString(sum[:8])
 }
 
