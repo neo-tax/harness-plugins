@@ -37,6 +37,8 @@ func TestParseRemoteURL(t *testing.T) {
 		`C:\Users\someone\repo`:                                                nil,
 		"C:/Users/someone/repo":                                                nil,
 		"../sibling":                                                           nil,
+		"https://gitserver/team/repo":                                          {Host: "gitserver", Owner: "team", Name: "repo"},
+		"http://localhost:3000/owner/repo":                                     {Host: "localhost", Owner: "owner", Name: "repo"},
 		"gh:neo-tax/harness-plugins":                                           nil, // an insteadOf alias, not a host
 		"https://github.com/onlyowner":                                         nil,
 		"":                                                                     nil,
@@ -217,5 +219,19 @@ func TestUnbornBranchKeepsRepoAndBranch(t *testing.T) {
 	id := gitident.Identify(dir)
 	if id.Repo == nil || id.Repo.Name != "empty" || str(id.Branch) != "First" || id.HeadSHA != nil {
 		t.Fatalf("%+v branch %s head %s", id.Repo, str(id.Branch), str(id.HeadSHA))
+	}
+}
+
+// With the reftable backend the HEAD file holds a placeholder; an unborn
+// branch there is reported as unknown rather than as the placeholder.
+func TestUnbornBranchUnderReftableIsNotPlaceholder(t *testing.T) {
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init", "-q", "--ref-format=reftable", "-b", "main")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Skip("installed git does not support reftable")
+	}
+	if b := gitident.Identify(dir).Branch; b != nil && *b != "main" {
+		t.Fatalf("branch %q", *b)
 	}
 }

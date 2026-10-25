@@ -42,5 +42,5 @@ Branch case is preserved because git branch names are case-sensitive; the server
 ## Risks
 
 - **A repository with no remote.** `repo` is null and sessions cannot be joined to a PR. Accepted; the session still counts toward the device and shows as unmatched.
-- **Remote URLs rewritten by `url.<base>.insteadOf` or set in an included config file.** The agent reads only the repository's own config and does not apply git's rewriting, so an alias such as `gh:owner/repo` yields a null `repo` (a host with no dot is treated as an alias) rather than a wrong one. Accepted for v0.1.
+- **Remote URLs rewritten by `url.<base>.insteadOf` or set in an included config file.** The agent reads only the repository's own config and does not apply git's rewriting, so an alias such as `gh:owner/repo` yields a null `repo` (an scp-style host with no dot is treated as an alias) rather than a wrong one. Accepted for v0.1.
 - **Forks whose `origin` is the fork.** `repo` names the fork, not the upstream the PR targets. Accepted for v0.1; the server can match on `head_sha` and the PR's head repository.

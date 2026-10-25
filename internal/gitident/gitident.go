@@ -92,6 +92,9 @@ func unbornRef(gitDir string) string {
 		return ""
 	}
 	ref, _ := strings.CutPrefix(strings.TrimSpace(string(b)), "ref: ")
+	if ref == "refs/heads/.invalid" { // reftable's placeholder; the real HEAD is in the reftable
+		return ""
+	}
 	return ref
 }
 
@@ -203,7 +206,8 @@ func unquote(v string) string {
 func ParseRemoteURL(raw string) *contract.Repo {
 	raw = strings.TrimSpace(raw)
 	var host, path string
-	if strings.Contains(raw, "://") {
+	scp := !strings.Contains(raw, "://")
+	if !scp {
 		u, err := url.Parse(raw)
 		if err != nil || u.Scheme == "file" {
 			return nil
@@ -223,10 +227,10 @@ func ParseRemoteURL(raw string) *contract.Repo {
 	}
 	path = strings.TrimSuffix(strings.Trim(path, "/"), ".git")
 	segments := strings.Split(path, "/")
-	// A host with no dot is an insteadOf alias (gh:owner/repo) or a local
-	// name; without git's URL rewriting it would yield a wrong identity, so
-	// it yields none.
-	if !strings.Contains(host, ".") || len(segments) < 2 {
+	// An scp-style host with no dot is most likely an insteadOf alias
+	// (gh:owner/repo); without git's URL rewriting it would yield a wrong
+	// identity, so it yields none.
+	if host == "" || (scp && !strings.Contains(host, ".")) || len(segments) < 2 {
 		return nil
 	}
 	name := segments[len(segments)-1]
