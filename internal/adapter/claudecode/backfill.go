@@ -162,10 +162,11 @@ func Backfill(ctx context.Context, o BackfillOptions) error {
 		}
 	}
 	flush()
-	finish(false)
 	if a.Queue.NeedsEnrollment() {
+		finish(true)
 		return ErrCannotSend
 	}
+	finish(false)
 	fmt.Fprintf(o.Out, "Backfilled %d sessions (%d events).\n", sessions, events)
 	return nil
 }

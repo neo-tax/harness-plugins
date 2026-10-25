@@ -50,3 +50,22 @@ func TestLockSerializes(t *testing.T) {
 	}
 	u2()
 }
+
+// Merge never moves a cursor backwards in the same file, but follows a
+// rewritten file.
+func TestMergeKeepsFurtherCursor(t *testing.T) {
+	s := cursor.Open(t.TempDir())
+	s.Put("/t.jsonl", cursor.Cursor{Offset: 100, Head: "h"})
+	s.Merge(map[string]cursor.Cursor{"/t.jsonl": {Offset: 50, Head: "h"}})
+	if c := s.Get("/t.jsonl"); c.Offset != 100 {
+		t.Fatalf("moved back to %d", c.Offset)
+	}
+	s.Merge(map[string]cursor.Cursor{"/t.jsonl": {Offset: 150, Head: "h"}})
+	if c := s.Get("/t.jsonl"); c.Offset != 150 {
+		t.Fatalf("did not advance: %d", c.Offset)
+	}
+	s.Merge(map[string]cursor.Cursor{"/t.jsonl": {Offset: 10, Head: "other"}})
+	if c := s.Get("/t.jsonl"); c.Offset != 10 || c.Head != "other" {
+		t.Fatalf("rewritten file not followed: %+v", c)
+	}
+}
