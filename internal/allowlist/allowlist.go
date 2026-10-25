@@ -57,7 +57,7 @@ var byKind = map[string][]Field{
 		{"entrypoint", "How the harness was launched, for example cli or sdk.", nil},
 		{"source", "Why the session started: startup, resume, clear, or compact.", nil},
 		repo, branch, headSHA,
-		{"git_user_email", "The repository-level git user.email, used only to join sessions to pull-request authors.", nil},
+		{"git_user_email", "The git user.email in effect for the repository (its own config, else the engineer's global git config), used only to join sessions to pull-request authors.", nil},
 		{"dropped_events", "How many events the agent discarded because its local queue was full.", nil},
 	},
 	contract.KindTurn: {

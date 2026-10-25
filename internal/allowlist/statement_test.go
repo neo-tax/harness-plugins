@@ -89,7 +89,7 @@ func TestStatementNamesIdentityLine(t *testing.T) {
 	s := allowlist.Statement()
 	for _, want := range []string{
 		"Neo.Tax receives two values meant to identify the engineer: the email the engineer confirms at enrollment",
-		"repository-level git `user.email`",
+		"git `user.email` in effect for the repository",
 		"`branch` is free text the engineer or their tools choose",
 		"`repo.owner` is the account that owns the repository, which is a personal username",
 		"The device hostname, sent once at enrollment",
