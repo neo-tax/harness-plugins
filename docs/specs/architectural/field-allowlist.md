@@ -4,9 +4,12 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-10-24
-updated: 2026-10-24
+updated: 2026-10-25
 version: 1
-affects: []
+affects:
+  - internal/allowlist/*.go
+  - cmd/privacy-statement/*.go
+  - PRIVACY.md
 ---
 
 # Field allowlist
@@ -15,20 +18,21 @@ Governs the single list of fields the agent is permitted to emit, how it is enfo
 
 ## Requirements
 
-- `one-allowlist`(approved): The agent holds exactly one allowlist, keyed by event kind, listing every field that event kind may carry.
-- `allowlist-matches-contract`(approved): The allowlist names exactly the fields the wire contract schema permits for each event kind, and a test fails when they differ.
+- `one-allowlist`(tested): The agent holds exactly one allowlist, keyed by event kind, listing every field that event kind may carry.
+- `allowlist-matches-contract`(tested): The allowlist names exactly the fields the wire contract schema permits for each event kind, and a test fails when they differ.
 - `enforced-below-adapters`(approved): The allowlist is applied by the shared agent after an adapter produces an event and before the event is queued, so no adapter can add a field.
 - `unknown-field-dropped-and-counted`(approved): A field not on the allowlist is removed before queuing and the removal is counted in the agent's local diagnostics.
-- `cwd-excluded`(approved): The working-directory path is not on the allowlist for any event kind.
-- `title-excluded`(approved): A harness-generated session title or slug is not on the allowlist for any event kind.
-- `content-excluded`(approved): Prompt text, completion text, tool inputs, tool outputs, and file paths are not on the allowlist for any event kind.
-- `request-id-included`(approved): The vendor's API request id is on the allowlist for `session.turn`.
-- `git-user-email-included`(approved): The repository-level git `user.email` is on the allowlist for `session.opened` only.
+- `cwd-excluded`(tested): The working-directory path is not on the allowlist for any event kind.
+- `title-excluded`(tested): A harness-generated session title or slug is not on the allowlist for any event kind.
+- `content-excluded`(tested): Prompt text, completion text, tool inputs, tool outputs, and file paths are not on the allowlist for any event kind.
+- `request-id-included`(tested): The vendor's API request id is on the allowlist for `session.turn`.
+- `git-user-email-included`(tested): The repository-level git `user.email` is on the allowlist for `session.opened` only.
 - `content-bearing-payloads-reduced`(approved): A hook payload that carries model output is reduced to its usage counts inside the agent before any of it is written to disk.
-- `privacy-statement-generated`(approved): The published privacy statement's field table is generated from the allowlist in code, and CI fails when the committed statement differs from the generated one.
-- `statement-per-event-kind`(approved): The generated statement lists, per event kind, every field and a one-line description of what it contains.
-- `statement-names-identity-line`(approved): The statement states that the only personal identity sent is the email the engineer confirms at enrollment, plus the repository-level git email as a join signal.
-- `change-updates-this-spec`(approved): Adding or removing a field from the allowlist updates the requirements of this spec in the same change.
+- `privacy-statement-generated`(tested): The published privacy statement's field table is generated from the allowlist in code, and CI fails when the committed statement differs from the generated one.
+- `statement-per-event-kind`(tested): The generated statement lists, per event kind, every field and a one-line description of what it contains.
+- `statement-names-identity-line`(tested): The statement states that the only personal identity sent is the email the engineer confirms at enrollment, plus the repository-level git email as a join signal.
+- `change-updates-this-spec`(built): Adding or removing a field from the allowlist updates the requirements of this spec in the same change.
+  - status-reason: a process rule stated at the top of internal/allowlist/allowlist.go and enforced in review; no test can see the spec diff
 
 ## Design Notes
 

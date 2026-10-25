@@ -222,3 +222,39 @@ func SchemaFields() map[string][]string {
 	}
 	return out
 }
+
+// ObjectFields returns the sorted property names of the object the session
+// event schema defines under $defs/<name>, looking through a nullable oneOf.
+// It returns nil when no such object is defined.
+func ObjectFields(name string) []string {
+	b, err := schemaFS.ReadFile(SessionEventSchema)
+	if err != nil {
+		panic(err)
+	}
+	type object struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+		OneOf      []object                   `json:"oneOf"`
+	}
+	var doc struct {
+		Defs map[string]object `json:"$defs"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		panic(err)
+	}
+	def, ok := doc.Defs[name]
+	if !ok {
+		return nil
+	}
+	props := def.Properties
+	for _, alt := range def.OneOf {
+		if len(alt.Properties) > 0 {
+			props = alt.Properties
+		}
+	}
+	var out []string
+	for p := range props {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
+}
