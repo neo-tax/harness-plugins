@@ -185,3 +185,15 @@ func TestBackfillKeepsSessionWhenASubagentIsUnreadable(t *testing.T) {
 		t.Fatal("session skipped")
 	}
 }
+
+// A backfill records when it started and finished, for diagnosis and so a
+// caller can wait for a detached one.
+func TestBackfillRecordsStatus(t *testing.T) {
+	h := newHookEnv(t, true)
+	root := projects(t, h.repo)
+	h.backfill(root)
+	st, err := claudecode.ReadBackfillStatus(h.data)
+	if err != nil || st.StartedAt.IsZero() || st.FinishedAt.IsZero() || st.Sessions != 2 {
+		t.Fatalf("%+v %v", st, err)
+	}
+}

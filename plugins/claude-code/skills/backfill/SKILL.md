@@ -6,7 +6,7 @@ description: Resend metadata for every Claude Code session on this machine to Ne
 Run this command with the Bash tool:
 
 ```bash
-"${CLAUDE_SKILL_DIR}/../../bin/neo-tax-agent" backfill
+"${CLAUDE_SKILL_DIR}/../../bin/neo-tax-agent" backfill --background
 ```
 
 Report its final message to the engineer.

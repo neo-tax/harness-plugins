@@ -77,7 +77,8 @@ func TestSkillsDelegateToAgent(t *testing.T) {
 			t.Errorf("skill is not named %s", name)
 		}
 		blocks := regexp.MustCompile("(?s)```bash\n(.*?)```").FindAllStringSubmatch(s, -1)
-		if len(blocks) != 1 || strings.TrimSpace(blocks[0][1]) != `"${CLAUDE_SKILL_DIR}/../../bin/neo-tax-agent" `+name {
+		want := map[string]string{"login": "login", "backfill": "backfill --background"}[name]
+		if len(blocks) != 1 || strings.TrimSpace(blocks[0][1]) != `"${CLAUDE_SKILL_DIR}/../../bin/neo-tax-agent" `+want {
 			t.Fatalf("%s code blocks %q", name, blocks)
 		}
 	}

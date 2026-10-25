@@ -102,6 +102,8 @@ func Backfill(ctx context.Context, o BackfillOptions) error {
 		defer cancel()
 		a.Queue.Flush(fctx, client)
 	}
+	status := BackfillStatus{StartedAt: o.Now().UTC()}
+	writeBackfillStatus(o.DataDir, status)
 
 	store := cursor.Open(o.DataDir)
 	if err := withCursorLock(store, store.Reset); err != nil {
@@ -123,14 +125,53 @@ func Backfill(ctx context.Context, o BackfillOptions) error {
 			sessions++
 			events += n
 		}
+		// Flush about a batch at a time rather than per transcript.
+		if a.Queue.Size() < min(flushEvery, o.QueueLimit) {
+			continue
+		}
 		flush()
 		if a.Queue.Size() > o.QueueLimit {
+			status.Sessions, status.Events, status.Paused, status.FinishedAt = sessions, events, true, o.Now().UTC()
+			writeBackfillStatus(o.DataDir, status)
 			fmt.Fprintf(o.Out, "Backfilled %d sessions (%d events), then paused: Neo.Tax is not accepting events right now. Run neo-tax:backfill again later.\n", sessions, events)
 			return nil
 		}
 	}
+	flush()
+	status.Sessions, status.Events, status.FinishedAt = sessions, events, o.Now().UTC()
+	writeBackfillStatus(o.DataDir, status)
 	fmt.Fprintf(o.Out, "Backfilled %d sessions (%d events).\n", sessions, events)
 	return nil
+}
+
+// flushEvery is roughly one ingest batch of queued events.
+const flushEvery = 256 << 10
+
+// BackfillStatus is the last backfill's progress, kept in backfill.json.
+type BackfillStatus struct {
+	StartedAt  time.Time `json:"started_at"`
+	FinishedAt time.Time `json:"finished_at,omitempty"`
+	Sessions   int       `json:"sessions"`
+	Events     int       `json:"events"`
+	Paused     bool      `json:"paused,omitempty"`
+}
+
+func writeBackfillStatus(dataDir string, s BackfillStatus) {
+	b, _ := json.Marshal(s)
+	tmp := filepath.Join(dataDir, "backfill.json.tmp")
+	if os.WriteFile(tmp, b, 0o600) == nil {
+		os.Rename(tmp, filepath.Join(dataDir, "backfill.json"))
+	}
+}
+
+// ReadBackfillStatus returns the last backfill's status.
+func ReadBackfillStatus(dataDir string) (BackfillStatus, error) {
+	var s BackfillStatus
+	b, err := os.ReadFile(filepath.Join(dataDir, "backfill.json"))
+	if err != nil {
+		return s, err
+	}
+	return s, json.Unmarshal(b, &s)
 }
 
 func withCursorLock(store *cursor.Store, fn func() error) error {
@@ -176,7 +217,16 @@ func readSessionStart(path string) (sessionStart, bool) {
 	found := false
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 64<<20)
+	// These fields appear in a session's first lines; look a bounded way
+	// past the first timestamped line rather than parse the whole file.
+	lookahead := 50
 	for sc.Scan() {
+		if found {
+			if lookahead == 0 {
+				break
+			}
+			lookahead--
+		}
 		var s sessionStart
 		if json.Unmarshal(sc.Bytes(), &s) != nil || s.Timestamp.IsZero() {
 			continue

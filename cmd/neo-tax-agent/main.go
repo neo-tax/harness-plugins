@@ -173,6 +173,7 @@ func backfill(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("backfill", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dir := fs.String("data-dir", "", "plugin data directory (default $CLAUDE_PLUGIN_DATA)")
+	background := fs.Bool("background", false, "start the backfill detached and return")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -180,6 +181,14 @@ func backfill(args []string, stdout, stderr io.Writer) int {
 	if d == "" {
 		fmt.Fprintln(stderr, "neo-tax-agent: no plugin data directory; pass --data-dir")
 		return 2
+	}
+	if *background {
+		if err := startBackfill(d); err != nil {
+			fmt.Fprintln(stderr, "neo-tax-agent: could not start the backfill:", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, "Started resending your Claude Code sessions in the background.")
+		return 0
 	}
 	err := claudecode.Backfill(context.Background(), claudecode.BackfillOptions{DataDir: d, AgentVersion: Version, Out: stdout})
 	if errors.Is(err, claudecode.ErrBackfillRunning) {

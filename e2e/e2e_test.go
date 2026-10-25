@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/neo-tax/harness-plugins/internal/adapter/claudecode"
 )
 
 var agentBin, fakeBin string
@@ -127,8 +129,28 @@ func (w *world) hook(name string, extra map[string]any) {
 
 func (w *world) login() {
 	w.t.Helper()
+	before, _ := claudecode.ReadBackfillStatus(w.data)
 	if out, code := w.shim("", "login", "--server", w.url, "--token", "et", "--email", "e@example.com"); code != 0 {
 		w.t.Fatalf("login exit %d: %s", code, out)
+	}
+	w.waitBackfill(before.StartedAt)
+}
+
+// waitBackfill waits for the detached backfill that login or --background
+// started after since to finish, so it never races the test's own hooks or
+// its temp-dir cleanup.
+func (w *world) waitBackfill(since time.Time) {
+	w.t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		st, err := claudecode.ReadBackfillStatus(w.data)
+		if err == nil && st.StartedAt.After(since) && !st.FinishedAt.IsZero() {
+			return
+		}
+		if time.Now().After(deadline) {
+			w.t.Fatal("background backfill did not finish")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -285,15 +307,21 @@ func (w *world) pastSession() {
 `), 0o600)
 }
 
-func (w *world) waitFor(n int) []map[string]any {
-	w.t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		got := w.recorded()
-		if len(got) >= n || time.Now().After(deadline) {
-			return got
-		}
-		time.Sleep(100 * time.Millisecond)
+// The backfill skill's --background form returns at once and the detached
+// backfill still runs.
+// @spec: event-queue-and-backfill#backfill-command
+func TestBackfillInBackground(t *testing.T) {
+	w := newWorld(t)
+	w.login()
+	w.pastSession()
+	before, _ := claudecode.ReadBackfillStatus(w.data)
+	out, code := w.shim("", "backfill", "--background")
+	if code != 0 || !strings.Contains(out, "background") {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	w.waitBackfill(before.StartedAt)
+	if k := kinds(w.recorded()); k != "opened,turn" {
+		t.Fatalf("recorded %s", k)
 	}
 }
 
@@ -306,7 +334,8 @@ func TestLoginStartsBackfill(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "background") {
 		t.Fatalf("exit %d: %s", code, out)
 	}
-	got := w.waitFor(2)
+	w.waitBackfill(time.Time{})
+	got := w.recorded()
 	if k := kinds(got); k != "opened,turn" || got[0]["session_id"] != "past-session" {
 		t.Fatalf("recorded %s", k)
 	}
@@ -315,17 +344,9 @@ func TestLoginStartsBackfill(t *testing.T) {
 // @spec: event-queue-and-backfill#backfill-command
 func TestBackfillCommand(t *testing.T) {
 	w := newWorld(t)
-	w.login() // also starts a background backfill of the (empty) projects dir
+	w.login()
 	w.pastSession()
-	var out string
-	var code int
-	for deadline := time.Now().Add(30 * time.Second); ; {
-		out, code = w.shim("", "backfill")
-		if !strings.Contains(out, "already running") || time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
+	out, code := w.shim("", "backfill")
 	if code != 0 || !strings.Contains(out, "Backfilled 1 sessions") {
 		t.Fatalf("exit %d: %s", code, out)
 	}
