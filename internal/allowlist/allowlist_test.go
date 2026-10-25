@@ -38,6 +38,9 @@ func TestAllowlistMatchesContract(t *testing.T) {
 			if f.Description == "" {
 				t.Errorf("%s.%s has no description", kind, f.Name)
 			}
+			if (len(f.Children) > 0) != (contract.ObjectFields(f.Name) != nil) {
+				t.Errorf("%s.%s: allowlist children %v, schema object fields %v", kind, f.Name, names(f.Children), contract.ObjectFields(f.Name))
+			}
 			if len(f.Children) > 0 {
 				if got, want := names(f.Children), contract.ObjectFields(f.Name); !reflect.DeepEqual(got, want) {
 					t.Errorf("%s.%s children:\n allowlist %v\n contract  %v", kind, f.Name, got, want)
@@ -116,8 +119,7 @@ func TestApplyDropsUnknownFieldsAndReportsThem(t *testing.T) {
 	}
 }
 
-// A nested allowlisted object that arrives as something other than an object
-// (null repo) passes through as-is; schema validation owns its shape.
+// A null object-valued field (repo outside git) passes through.
 func TestApplyKeepsNullNestedObjects(t *testing.T) {
 	out, dropped, err := allowlist.Apply(map[string]any{"event_kind": "session.opened", "repo": nil})
 	if err != nil || len(dropped) != 0 {
@@ -144,4 +146,40 @@ func contains(xs []string, x string) bool {
 		}
 	}
 	return false
+}
+
+// A value whose shape the allowlist does not describe never passes through:
+// an object or array under a leaf field, or a non-object under an object
+// field, is dropped and reported.
+// @spec: field-allowlist#unknown-field-dropped-and-counted
+func TestApplyDropsValuesOfTheWrongShape(t *testing.T) {
+	ev := map[string]any{
+		"event_kind": "session.turn",
+		"model":      map[string]any{"name": "x", "cwd": "/Users/alice/acme"},
+		"branch":     []any{"main", "/Users/alice"},
+		"usage":      []any{map[string]any{"path": "/x"}},
+	}
+	out, dropped, _ := allowlist.Apply(ev)
+	for _, k := range []string{"model", "branch", "usage"} {
+		if _, ok := out[k]; ok {
+			t.Errorf("%s kept: %v", k, out[k])
+		}
+	}
+	sort.Strings(dropped)
+	if !reflect.DeepEqual(dropped, []string{"branch", "model", "usage"}) {
+		t.Errorf("dropped %v", dropped)
+	}
+}
+
+// Dropped names are reported for local diagnostics, so a key that is not a
+// plain identifier (a file path used as a map key, say) is never reported
+// verbatim.
+func TestDroppedNamesNeverCarryContent(t *testing.T) {
+	_, dropped, _ := allowlist.Apply(map[string]any{
+		"event_kind": "session.closed", "/Users/alice/acme/secret.go": 1, "extra_field": 2,
+	})
+	sort.Strings(dropped)
+	if !reflect.DeepEqual(dropped, []string{allowlist.RedactedName, "extra_field"}) {
+		t.Errorf("dropped %v", dropped)
+	}
 }

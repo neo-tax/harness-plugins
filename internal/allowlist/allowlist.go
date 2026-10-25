@@ -11,6 +11,7 @@ package allowlist
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 
 	"github.com/neo-tax/harness-plugins/contract"
@@ -106,7 +107,9 @@ func For(kind string) ([]Field, bool) {
 
 // Apply returns a copy of ev holding only allowlisted fields, and the dotted
 // names of every field it removed. It never returns a removed value. An event
-// of an unknown kind is an error and must not be queued.
+// of an unknown kind is an error and must not be queued. ev holds values as
+// encoding/json decodes them (maps, []any, scalars); a value whose shape the
+// allowlist does not describe is dropped, not passed through.
 //
 // @spec: field-allowlist#unknown-field-dropped-and-counted
 func Apply(ev map[string]any) (map[string]any, []string, error) {
@@ -120,6 +123,20 @@ func Apply(ev map[string]any) (map[string]any, []string, error) {
 	return out, dropped, nil
 }
 
+// RedactedName stands in for a dropped field whose name is not a plain
+// identifier, so diagnostics never record a key that could be content.
+const RedactedName = "<redacted>"
+
+var plainName = regexp.MustCompile(`^[a-z0-9_]{1,64}$`)
+
+func report(dropped *[]string, prefix, key string) {
+	if !plainName.MatchString(key) {
+		key = RedactedName
+		prefix = ""
+	}
+	*dropped = append(*dropped, prefix+key)
+}
+
 func filter(in map[string]any, fields []Field, prefix string, dropped *[]string) map[string]any {
 	allowed := make(map[string]Field, len(fields))
 	for _, f := range fields {
@@ -129,11 +146,25 @@ func filter(in map[string]any, fields []Field, prefix string, dropped *[]string)
 	for k, v := range in {
 		f, ok := allowed[k]
 		if !ok {
-			*dropped = append(*dropped, prefix+k)
+			report(dropped, prefix, k)
 			continue
 		}
-		if child, isObj := v.(map[string]any); isObj && len(f.Children) > 0 {
-			v = filter(child, f.Children, prefix+k+".", dropped)
+		switch val := v.(type) {
+		case nil:
+		case map[string]any:
+			if len(f.Children) == 0 {
+				report(dropped, prefix, k)
+				continue
+			}
+			v = filter(val, f.Children, prefix+k+".", dropped)
+		case []any:
+			report(dropped, prefix, k)
+			continue
+		default:
+			if len(f.Children) > 0 {
+				report(dropped, prefix, k)
+				continue
+			}
 		}
 		out[k] = v
 	}
