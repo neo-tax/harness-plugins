@@ -422,3 +422,59 @@ func TestNoQueueNoRequest(t *testing.T) {
 		t.Fatalf("%+v", res)
 	}
 }
+
+// A corrupt line between valid ones must not move the queue past the valid
+// lines when the send that carries them fails.
+// @spec: event-queue-and-backfill#no-database
+// @spec: event-queue-and-backfill#segment-advances-on-success
+func TestCorruptLineBeforeFailedSendLosesNothing(t *testing.T) {
+	e := setup(t)
+	e.appendN("a", 1)
+	f, _ := os.OpenFile(e.files("queue", "*.jsonl")[0], os.O_APPEND|os.O_WRONLY, 0)
+	f.WriteString("{not json\n")
+	f.Close()
+	e.appendN("b", 1)
+	e.fault(fakeingest.FaultServerError, 1)
+	if res := e.flush(); !res.Failed {
+		t.Fatalf("%+v", res)
+	}
+	e.clock.advance(time.Minute)
+	res := e.flush()
+	if res.Sent != 2 || res.DeadLettered != 1 || len(e.recorded()) != 2 {
+		t.Fatalf("%+v recorded %d", res, len(e.recorded()))
+	}
+	if n := len(e.files("deadletter", "*.json")); n != 1 {
+		t.Fatalf("%d dead letters", n)
+	}
+}
+
+// Losing state.json never overwrites or reorders queued segments.
+func TestLostStateKeepsSegmentsAndOrder(t *testing.T) {
+	e := setup(t)
+	e.fault(fakeingest.FaultServerError, 1)
+	e.appendN("a", 1)
+	e.flush() // seals seg 1, fails
+	os.Remove(filepath.Join(e.q.Dir, "state.json"))
+	e.appendN("b", 1)
+	e.clock.advance(time.Hour)
+	if res := e.flush(); res.Sent != 2 {
+		t.Fatalf("%+v", res)
+	}
+	got := e.recorded()
+	if got[0]["message_id"] != "a-00000" || got[1]["message_id"] != "b-00000" {
+		t.Fatalf("order %v, %v", got[0]["message_id"], got[1]["message_id"])
+	}
+}
+
+// A hook killed mid-write leaves a partial line; the next event is still
+// its own line.
+func TestPartialTrailingLineDoesNotSwallowNextEvent(t *testing.T) {
+	e := setup(t)
+	os.MkdirAll(filepath.Join(e.q.Dir, "queue"), 0o700)
+	os.WriteFile(filepath.Join(e.q.Dir, "queue", "active.jsonl"), []byte(`{"event_kind":"sess`), 0o600)
+	e.appendN("a", 1)
+	res := e.flush()
+	if res.Sent != 1 || res.DeadLettered != 1 || len(e.recorded()) != 1 {
+		t.Fatalf("%+v", res)
+	}
+}

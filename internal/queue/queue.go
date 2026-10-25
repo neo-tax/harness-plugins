@@ -128,11 +128,20 @@ func (q *Queue) Append(events [][]byte) error {
 	}
 	return q.withState(func(st *State) error {
 		active := filepath.Join(q.queueDir(), activeName)
-		f, err := os.OpenFile(active, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+		f, err := os.OpenFile(active, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o600)
 		if err != nil {
 			return err
 		}
-		_, werr := f.Write(buf.Bytes())
+		out := buf.Bytes()
+		// A hook killed mid-write leaves a partial last line; start on a
+		// fresh line so it stays one corrupt line instead of swallowing ours.
+		if fi, err := f.Stat(); err == nil && fi.Size() > 0 {
+			last := make([]byte, 1)
+			if _, err := f.ReadAt(last, fi.Size()-1); err == nil && last[0] != '\n' {
+				out = append([]byte{'\n'}, out...)
+			}
+		}
+		_, werr := f.Write(out)
 		cerr := f.Close()
 		if werr != nil || cerr != nil {
 			return errors.Join(werr, cerr)
@@ -156,8 +165,20 @@ func (q *Queue) seal(st *State) error {
 	if err != nil {
 		return err
 	}
+	// Number past every existing segment, so a lost or stale state.json can
+	// neither overwrite a segment nor sort new events before old ones.
+	for _, seg := range q.sealed() {
+		var n uint64
+		if _, err := fmt.Sscanf(filepath.Base(seg), "seg-%d.jsonl", &n); err == nil && n > st.NextSegment {
+			st.NextSegment = n
+		}
+	}
 	st.NextSegment++
-	return os.Rename(active, filepath.Join(q.queueDir(), fmt.Sprintf("seg-%016d.jsonl", st.NextSegment)))
+	dst := filepath.Join(q.queueDir(), fmt.Sprintf("seg-%016d.jsonl", st.NextSegment))
+	if _, err := os.Stat(dst); !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("queue: refusing to overwrite %s", filepath.Base(dst))
+	}
+	return os.Rename(active, dst)
 }
 
 func (q *Queue) sealed() []string {
@@ -292,6 +313,11 @@ func (q *Queue) Flush(ctx context.Context, s Sender) (FlushResult, error) {
 		return res, err
 	}
 	defer lock.Unlock()
+	// Another invocation may have recorded a rejection or backoff while we
+	// waited for the lock.
+	if st := q.State(); st.NeedsEnrollment || q.Now().Before(st.NextAttemptAt) {
+		return res, nil
+	}
 
 	if err := q.withState(func(st *State) error { return q.seal(st) }); err != nil {
 		return res, err
@@ -301,13 +327,22 @@ func (q *Queue) Flush(ctx context.Context, s Sender) (FlushResult, error) {
 		if err != nil {
 			return res, err
 		}
-		for _, p := range corrupt {
-			if err := q.deadLetter(p.raw, "corrupt queue line"); err != nil {
-				return res, err
+		// Corrupt lines are dead-lettered and the batch's range advanced
+		// together, only once the batch reaches a terminal outcome, so a
+		// failed send never moves the offset past unsent lines.
+		settleCorrupt := func() error {
+			for _, p := range corrupt {
+				if err := q.deadLetter(p.raw, "corrupt queue line"); err != nil {
+					return err
+				}
+				res.DeadLettered++
 			}
-			res.DeadLettered++
+			return nil
 		}
 		if len(batch) == 0 {
+			if err := settleCorrupt(); err != nil {
+				return res, err
+			}
 			if err := q.advance(corrupt, ends); err != nil {
 				return res, err
 			}
@@ -315,9 +350,6 @@ func (q *Queue) Flush(ctx context.Context, s Sender) (FlushResult, error) {
 				break
 			}
 			continue
-		}
-		if err := q.advance(corrupt, nil); err != nil {
-			return res, err
 		}
 		raws := make([]json.RawMessage, len(batch))
 		for i, p := range batch {
@@ -362,7 +394,10 @@ func (q *Queue) Flush(ctx context.Context, s Sender) (FlushResult, error) {
 			res.Failed = true
 			return res, q.backOff()
 		}
-		if err := q.advance(batch, ends); err != nil {
+		if err := settleCorrupt(); err != nil {
+			return res, err
+		}
+		if err := q.advance(append(batch, corrupt...), ends); err != nil {
 			return res, err
 		}
 	}
@@ -445,6 +480,9 @@ func (q *Queue) nextBatch() (batch, corrupt []pending, ends map[string]int, err 
 func (q *Queue) advance(handled []pending, ends map[string]int) error {
 	return q.withState(func(st *State) error {
 		for _, p := range handled {
+			if _, err := os.Stat(filepath.Join(q.queueDir(), p.seg)); errors.Is(err, os.ErrNotExist) {
+				continue // dropped by the cap while in flight
+			}
 			if p.line+1 > st.Offsets[p.seg] {
 				st.Offsets[p.seg] = p.line + 1
 			}
@@ -526,7 +564,14 @@ func mustJSON(v any) []byte {
 
 func writeFileAtomic(path string, data []byte) error {
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	_, werr := f.Write(data)
+	serr := f.Sync()
+	cerr := f.Close()
+	if err := errors.Join(werr, serr, cerr); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)
