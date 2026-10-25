@@ -197,3 +197,22 @@ func TestBackfillRecordsStatus(t *testing.T) {
 		t.Fatalf("%+v %v", st, err)
 	}
 }
+
+// A key revoked mid-backfill stops it with the reason, instead of filling
+// the queue.
+func TestBackfillStopsWhenKeyRejected(t *testing.T) {
+	h := newHookEnv(t, true)
+	root := projects(t, h.repo)
+	http.Post(h.srv.URL+"/_fake/faults", "application/json", strings.NewReader(`{"mode":"unauthorized","count":100}`))
+	err := claudecode.Backfill(context.Background(), claudecode.BackfillOptions{
+		DataDir: h.data, ConfigDir: root, AgentVersion: "v", Now: func() time.Time { return h.now },
+		HTTP: &http.Client{Timeout: 5 * time.Second}, QueueLimit: 1,
+	})
+	if !errors.Is(err, claudecode.ErrCannotSend) {
+		t.Fatalf("err %v", err)
+	}
+	st, _ := claudecode.ReadBackfillStatus(h.data)
+	if st.FinishedAt.IsZero() || !st.Paused || st.Sessions != 1 {
+		t.Fatalf("status %+v", st)
+	}
+}

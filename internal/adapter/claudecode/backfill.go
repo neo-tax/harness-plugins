@@ -112,14 +112,34 @@ func Backfill(ctx context.Context, o BackfillOptions) error {
 
 	transcripts := mainTranscripts(filepath.Join(o.ConfigDir, "projects"))
 	var sessions, events int
+	// Cursors were just reset, so transcripts are read from the start; the
+	// moves are recorded once per flushed batch rather than per session.
+	pending := map[string]cursor.Cursor{}
+	commit := func() {
+		if len(pending) == 0 {
+			return
+		}
+		if err := withCursorLock(store, func() error { return store.Merge(pending) }); err != nil {
+			agent.Logf(o.DataDir, "backfill cursor update failed: %s", errClass(err))
+		}
+		pending = map[string]cursor.Cursor{}
+	}
+	finish := func(paused bool) {
+		commit()
+		status.Sessions, status.Events, status.Paused, status.FinishedAt = sessions, events, paused, o.Now().UTC()
+		writeBackfillStatus(o.DataDir, status)
+	}
 	for _, path := range transcripts {
 		if ctx.Err() != nil {
 			break
 		}
-		n, err := backfillOne(a, store, path, dev.DeviceID, o)
+		n, moves, err := backfillOne(a, path, dev.DeviceID, o)
 		if err != nil {
 			agent.Logf(o.DataDir, "backfill transcript failed: %s", errClass(err))
 			continue
+		}
+		for p, c := range moves {
+			pending[p] = c
 		}
 		if n > 0 {
 			sessions++
@@ -130,16 +150,22 @@ func Backfill(ctx context.Context, o BackfillOptions) error {
 			continue
 		}
 		flush()
+		commit()
+		if a.Queue.NeedsEnrollment() {
+			finish(true)
+			return ErrCannotSend
+		}
 		if a.Queue.Size() > o.QueueLimit {
-			status.Sessions, status.Events, status.Paused, status.FinishedAt = sessions, events, true, o.Now().UTC()
-			writeBackfillStatus(o.DataDir, status)
+			finish(true)
 			fmt.Fprintf(o.Out, "Backfilled %d sessions (%d events), then paused: Neo.Tax is not accepting events right now. Run neo-tax:backfill again later.\n", sessions, events)
 			return nil
 		}
 	}
 	flush()
-	status.Sessions, status.Events, status.FinishedAt = sessions, events, o.Now().UTC()
-	writeBackfillStatus(o.DataDir, status)
+	finish(false)
+	if a.Queue.NeedsEnrollment() {
+		return ErrCannotSend
+	}
 	fmt.Fprintf(o.Out, "Backfilled %d sessions (%d events).\n", sessions, events)
 	return nil
 }
@@ -280,38 +306,33 @@ func readSessionStart(path string) (sessionStart, bool) {
 // pull-request link in its transcripts. The session's repository comes from
 // its working directory as it is today; branches come from the transcript,
 // and head_sha is null because the commit at the time is unknown.
-func backfillOne(a *agent.Agent, store *cursor.Store, path, deviceID string, o BackfillOptions) (int, error) {
+func backfillOne(a *agent.Agent, path, deviceID string, o BackfillOptions) (int, map[string]cursor.Cursor, error) {
 	start, ok := readSessionStart(path)
 	if !ok {
-		return 0, nil
+		return 0, nil, nil
 	}
 	git := gitident.Identify(start.Cwd)
 	sessionID := sessionIDOf(path)
 	ctx := Context{DeviceID: deviceID, AgentVersion: o.AgentVersion, SessionID: sessionID, Now: o.Now()}
 
-	var n int
-	err := withCursorLock(store, func() error {
-		res, err := TailEvents(ctx, path, store)
-		if err != nil {
-			// Keep what was read; Commit advances only the transcripts that
-			// were read successfully.
-			agent.Logf(o.DataDir, "backfill transcript read failed: %s", errClass(err))
-		}
-		opened := contract.NewOpened(ctx.envelope(start.Version), contract.OpenedFields{
-			StartedAt:    start.Timestamp.UTC(),
-			Entrypoint:   nonEmpty(start.Entrypoint),
-			Repo:         git.Repo,
-			Branch:       nonEmpty(start.GitBranch),
-			GitUserEmail: git.UserEmail,
-		})
-		events := append([]any{opened}, res.Events...)
-		if err := a.Emit(events...); err != nil {
-			return err
-		}
-		n = len(events)
-		return res.Commit()
+	res, moves, err := tailWith(ctx, path, nil)
+	if err != nil {
+		// Keep what was read; moves holds only the transcripts read
+		// successfully.
+		agent.Logf(o.DataDir, "backfill transcript read failed: %s", errClass(err))
+	}
+	opened := contract.NewOpened(ctx.envelope(start.Version), contract.OpenedFields{
+		StartedAt:    start.Timestamp.UTC(),
+		Entrypoint:   nonEmpty(start.Entrypoint),
+		Repo:         git.Repo,
+		Branch:       nonEmpty(start.GitBranch),
+		GitUserEmail: git.UserEmail,
 	})
-	return n, err
+	events := append([]any{opened}, res.Events...)
+	if err := a.Emit(events...); err != nil {
+		return 0, nil, err
+	}
+	return len(events), moves, nil
 }
 
 func sessionIDOf(path string) string {

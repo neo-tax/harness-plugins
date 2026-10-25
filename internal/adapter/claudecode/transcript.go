@@ -287,7 +287,14 @@ type Result struct {
 // @spec: claude-code-transcript-parser#subagent-transcripts-scanned
 // @spec: session-event-wire-contract#subagent-turns-belong-to-parent
 func TailEvents(ctx Context, mainPath string, store *cursor.Store) (Result, error) {
-	cursors := store.All()
+	res, moves, err := tailWith(ctx, mainPath, store.All())
+	res.Commit = func() error { return store.Update(moves) }
+	return res, err
+}
+
+// tailWith reads a session's transcripts from the given cursors and returns
+// the cursors it would move to.
+func tailWith(ctx Context, mainPath string, cursors map[string]cursor.Cursor) (Result, map[string]cursor.Cursor, error) {
 	moves := map[string]cursor.Cursor{}
 	var res Result
 	var errs []error
@@ -306,8 +313,7 @@ func TailEvents(ctx Context, mainPath string, store *cursor.Store) (Result, erro
 		id := subagentID(sub)
 		read(sub, &id)
 	}
-	res.Commit = func() error { return store.Update(moves) }
-	return res, errors.Join(errs...)
+	return res, moves, errors.Join(errs...)
 }
 
 // SupportedVersions are the Claude Code versions with a parser fixture under
