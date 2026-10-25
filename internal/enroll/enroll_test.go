@@ -283,3 +283,29 @@ func TestTokenReadWithoutEcho(t *testing.T) {
 		t.Fatalf("token %q out %q", f.last.EnrollmentToken, f.out.String())
 	}
 }
+
+// Events queued while the device awaited re-enrollment are delivered under
+// the new device, not dead-lettered for carrying the old device's id.
+// @spec: device-enrollment#rejected-key-stops-flushing
+func TestReEnrollmentDeliversEventsQueuedWhileRejected(t *testing.T) {
+	f := newFixture(t)
+	if err := enroll.Login(context.Background(), f.opts("et_good", "e@example.com")); err != nil {
+		t.Fatal(err)
+	}
+	old, _ := enroll.Load(f.dir)
+	a := agent.New(f.dir)
+	a.Emit(contract.NewClosed(contract.Envelope{ContractVersion: "1", DeviceID: old.DeviceID, Harness: "h", AgentVersion: "v", SessionID: "s", SentAt: time.Now()}, contract.ClosedFields{EndedAt: time.Now()}))
+	http.Post(f.srv.URL+"/_fake/devices/"+old.DeviceID+"/revoke", "", nil)
+	client, _ := enroll.Client(f.dir, http.DefaultClient)
+	if res, _ := a.Queue.Flush(context.Background(), client); !res.NeedsEnrollment {
+		t.Fatalf("%+v", res)
+	}
+	if err := enroll.Login(context.Background(), f.opts("et_good", "e@example.com")); err != nil {
+		t.Fatal(err)
+	}
+	client, _ = enroll.Client(f.dir, http.DefaultClient)
+	res, _ := a.Queue.Flush(context.Background(), client)
+	if res.Sent != 1 || res.DeadLettered != 0 {
+		t.Fatalf("%+v", res)
+	}
+}

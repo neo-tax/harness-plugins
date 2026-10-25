@@ -70,7 +70,7 @@ func Client(dataDir string, hc *http.Client) (*ingest.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ingest.Client{HTTP: hc, BaseURL: d.IngestBaseURL, DeviceKey: d.DeviceKey}, nil
+	return &ingest.Client{HTTP: hc, BaseURL: d.IngestBaseURL, DeviceKey: d.DeviceKey, DeviceID: d.DeviceID}, nil
 }
 
 // save writes the device file readable only by the owning user, replacing
@@ -79,10 +79,10 @@ func Client(dataDir string, hc *http.Client) (*ingest.Client, error) {
 // @spec: device-enrollment#key-storage-location
 // @spec: device-enrollment#one-key-per-device
 func save(dataDir string, d Device) error {
+	// The harness creates the plugin data directory; only a directory this
+	// call creates is given owner-only permissions. The key file itself is
+	// always owner-only.
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
-		return err
-	}
-	if err := os.Chmod(dataDir, 0o700); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(d, "", "  ")

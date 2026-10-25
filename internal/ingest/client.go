@@ -34,11 +34,22 @@ type Client struct {
 	HTTP      *http.Client
 	BaseURL   string
 	DeviceKey string
+	// DeviceID, when set, is stamped on every event at send time, so events
+	// queued before a re-enrollment are sent as the device that now holds
+	// the key.
+	DeviceID string
 }
 
 // Send posts one batch, oldest first, and returns the server's account of it.
 func (c *Client) Send(ctx context.Context, events []json.RawMessage) (contract.IngestResponse, error) {
 	var out contract.IngestResponse
+	if c.DeviceID != "" {
+		stamped := make([]json.RawMessage, len(events))
+		for i, ev := range events {
+			stamped[i] = stampDeviceID(ev, c.DeviceID)
+		}
+		events = stamped
+	}
 	body, err := json.Marshal(contract.IngestRequest{ContractVersion: contract.Version, Events: events})
 	if err != nil {
 		return out, err
@@ -61,6 +72,23 @@ func Enroll(ctx context.Context, hc *http.Client, baseURL string, req contract.E
 		return out, fmt.Errorf("enroll: malformed response: %w", err)
 	}
 	return out, nil
+}
+
+// stampDeviceID sets device_id on an event object, leaving anything that is
+// not an object for the server to reject.
+func stampDeviceID(ev json.RawMessage, id string) json.RawMessage {
+	dec := json.NewDecoder(bytes.NewReader(ev))
+	dec.UseNumber()
+	var m map[string]any
+	if dec.Decode(&m) != nil || m == nil {
+		return ev
+	}
+	m["device_id"] = id
+	b, err := json.Marshal(m)
+	if err != nil {
+		return ev
+	}
+	return b
 }
 
 func endpoint(base, path string) string { return strings.TrimRight(base, "/") + path }

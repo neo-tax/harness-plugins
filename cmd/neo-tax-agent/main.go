@@ -12,6 +12,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"golang.org/x/term"
@@ -82,6 +84,22 @@ func login(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if f, ok := stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
 		interactive = true
 		readSecret = func() (string, error) {
+			// Restore echo if the engineer interrupts at the prompt.
+			if st, err := term.GetState(int(f.Fd())); err == nil {
+				sig := make(chan os.Signal, 1)
+				signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+				done := make(chan struct{})
+				defer func() { signal.Stop(sig); close(done) }()
+				go func() {
+					select {
+					case <-sig:
+						term.Restore(int(f.Fd()), st)
+						fmt.Fprintln(stderr)
+						os.Exit(130)
+					case <-done:
+					}
+				}()
+			}
 			b, err := term.ReadPassword(int(f.Fd()))
 			return string(b), err
 		}
