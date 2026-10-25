@@ -154,7 +154,9 @@ func Backfill(ctx context.Context, o BackfillOptions) error {
 		}
 		// Flush about a batch at a time: once a batch has been queued since
 		// the last flush, whether or not that flush drained the queue.
-		if a.Queue.Size()-lastSize < min(flushEvery, o.QueueLimit) {
+		size := a.Queue.Size()
+		lastSize = min(lastSize, size) // a hook may have drained the queue since
+		if size-lastSize < min(flushEvery, o.QueueLimit) {
 			continue
 		}
 		flush()
