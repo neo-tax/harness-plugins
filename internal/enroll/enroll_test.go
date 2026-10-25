@@ -269,3 +269,17 @@ type failingAuth struct{}
 func (failingAuth) Send(context.Context, []json.RawMessage) (contract.IngestResponse, error) {
 	return contract.IngestResponse{}, &ingest.StatusError{Code: http.StatusUnauthorized, Message: "revoked"}
 }
+
+func TestTokenReadWithoutEcho(t *testing.T) {
+	f := newFixture(t)
+	o := f.opts("", "e@example.com")
+	o.Interactive = true
+	o.In = strings.NewReader("")
+	o.ReadSecret = func() (string, error) { return "et_good", nil }
+	if err := enroll.Login(context.Background(), o); err != nil {
+		t.Fatal(err)
+	}
+	if f.last.EnrollmentToken != "et_good" || strings.Contains(f.out.String(), "et_good") {
+		t.Fatalf("token %q out %q", f.last.EnrollmentToken, f.out.String())
+	}
+}

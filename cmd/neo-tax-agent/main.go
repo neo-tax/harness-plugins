@@ -78,16 +78,21 @@ func login(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 	interactive := false
-	if f, ok := stdin.(*os.File); ok {
-		interactive = term.IsTerminal(int(f.Fd()))
+	var readSecret func() (string, error)
+	if f, ok := stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
+		interactive = true
+		readSecret = func() (string, error) {
+			b, err := term.ReadPassword(int(f.Fd()))
+			return string(b), err
+		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-	err := enroll.Login(ctx, enroll.Options{
+	// No overall deadline: the engineer may take a while at the prompts.
+	// The HTTP client bounds the request itself.
+	err := enroll.Login(context.Background(), enroll.Options{
 		DataDir: d, Server: *server, Token: *token, Email: *email,
 		Harness: claudecode.Harness, AgentVersion: Version,
 		AccountEmail: claudecode.AccountEmail,
-		Interactive:  interactive, In: stdin, Out: stdout,
+		Interactive:  interactive, In: stdin, Out: stdout, ReadSecret: readSecret,
 		HTTP: &http.Client{Timeout: 30 * time.Second},
 	})
 	switch {

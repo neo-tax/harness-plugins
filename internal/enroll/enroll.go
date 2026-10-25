@@ -114,8 +114,10 @@ type Options struct {
 	// Interactive prompts on Out and reads answers from In.
 	Interactive bool
 	In          io.Reader
-	Out         io.Writer
-	HTTP        *http.Client
+	// ReadSecret, when set, reads the token without echoing it.
+	ReadSecret func() (string, error)
+	Out        io.Writer
+	HTTP       *http.Client
 }
 
 // Login enrolls this device. Missing input is prompted for on a terminal;
@@ -138,7 +140,16 @@ func Login(ctx context.Context, o Options) error {
 		in := bufio.NewReader(o.In)
 		if token == "" {
 			fmt.Fprint(o.Out, "Paste the enrollment token from your Neo.Tax admin: ")
-			token = readLine(in)
+			if o.ReadSecret != nil {
+				t, err := o.ReadSecret()
+				fmt.Fprintln(o.Out)
+				if err != nil {
+					return err
+				}
+				token = strings.TrimSpace(t)
+			} else {
+				token = readLine(in)
+			}
 		}
 		if email == "" {
 			email = promptEmail(o.Out, in, candidates)
