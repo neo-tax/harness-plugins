@@ -282,3 +282,25 @@ func TestOneGitProcessPerHook(t *testing.T) {
 		}
 	}
 }
+
+// A dropped-event count is not lost when the event carrying it cannot be
+// queued.
+func TestDroppedCountSurvivesFailedEmit(t *testing.T) {
+	h := newHookEnv(t, false)
+	q := queue.New(h.data)
+	q.SegmentMax, q.Cap = 100, 150
+	for i := 0; i < 10; i++ {
+		q.Append([][]byte{[]byte(`{"event_kind":"session.closed","pad":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}`)})
+	}
+	before := q.State().DroppedEvents
+	if before == 0 {
+		t.Fatal("setup: nothing dropped")
+	}
+	qdir := filepath.Join(h.data, "queue")
+	os.Chmod(qdir, 0o500) // appends fail
+	h.run("SessionStart", map[string]any{"source": "startup"})
+	os.Chmod(qdir, 0o700)
+	if got := q.State().DroppedEvents; got != before {
+		t.Fatalf("dropped count %d, want %d", got, before)
+	}
+}

@@ -375,3 +375,43 @@ func TestUserEmail(t *testing.T) {
 		t.Errorf("outside git: %s", str(id.UserEmail))
 	}
 }
+
+// Config includes are followed where git would follow them, so a work email
+// scoped to a directory with includeIf is the one reported.
+func TestUserEmailFollowsIncludes(t *testing.T) {
+	work := filepath.Join(t.TempDir(), "work")
+	os.MkdirAll(work, 0o755)
+	dir := filepath.Join(work, "repo")
+	os.MkdirAll(dir, 0o755)
+	git(t, dir, "init", "-q", "-b", "main")
+	cfgDir := t.TempDir()
+	os.WriteFile(filepath.Join(cfgDir, "work.inc"), []byte("[user]\n\temail = work@example.com\n"), 0o600)
+	os.WriteFile(filepath.Join(cfgDir, "other.inc"), []byte("[user]\n\temail = other@example.com\n"), 0o600)
+	global := filepath.Join(cfgDir, "gitconfig")
+	os.WriteFile(global, []byte(`[user]
+	email = personal@example.com
+[includeIf "gitdir:/nowhere/"]
+	path = other.inc
+[includeIf "gitdir:`+work+`/"]
+	path = work.inc
+`), 0o600)
+	t.Setenv("GIT_CONFIG_GLOBAL", global)
+	if got := str(gitident.Identify(dir).UserEmail); got != "work@example.com" {
+		t.Fatalf("got %s", got)
+	}
+	os.WriteFile(global, []byte("[include]\n\tpath = other.inc\n[user]\n\temail = after@example.com\n"), 0o600)
+	if got := str(gitident.Identify(dir).UserEmail); got != "after@example.com" {
+		t.Fatalf("later value must win: %s", got)
+	}
+}
+
+// A remote defined in an included file is found.
+func TestRemoteFromIncludedConfig(t *testing.T) {
+	dir := newRepo(t)
+	inc := filepath.Join(t.TempDir(), "remotes.inc")
+	os.WriteFile(inc, []byte("[remote \"origin\"]\n\turl = git@github.com:neo-tax/included.git\n"), 0o600)
+	git(t, dir, "config", "include.path", inc)
+	if r := gitident.Identify(dir).Repo; r == nil || r.Name != "included" {
+		t.Fatalf("%+v", r)
+	}
+}

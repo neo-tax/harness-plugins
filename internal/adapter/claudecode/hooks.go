@@ -130,6 +130,10 @@ func emit(a *agent.Agent, name string, p payload, o HookOptions) error {
 
 	var events []any
 	commit := func() error { return nil }
+	// The dropped count rides on opened and closed; it is consumed only once
+	// the event carrying it is queued.
+	dropped := a.Queue.State().DroppedEvents
+	carried := int64(0)
 	switch name {
 	case "SessionStart":
 		// @spec: claude-code-transcript-parser#opened-on-session-start
@@ -141,8 +145,9 @@ func emit(a *agent.Agent, name string, p payload, o HookOptions) error {
 			Branch:        git.Branch,
 			HeadSHA:       git.HeadSHA,
 			GitUserEmail:  git.UserEmail,
-			DroppedEvents: a.Queue.TakeDropped(),
+			DroppedEvents: dropped,
 		}))
+		carried = dropped
 	case "Stop", "PreCompact", "SessionEnd":
 		res, err := TailEvents(ctx, p.TranscriptPath, store)
 		if err != nil {
@@ -155,11 +160,15 @@ func emit(a *agent.Agent, name string, p payload, o HookOptions) error {
 		if name == "SessionEnd" {
 			// @spec: claude-code-transcript-parser#closed-on-session-end
 			events = append(events, contract.NewClosed(ctx.envelope(lastVersion(p.TranscriptPath, store)), contract.ClosedFields{
-				EndedAt: ctx.Now.UTC(), Reason: nonEmpty(p.Reason), DroppedEvents: a.Queue.TakeDropped(),
+				EndedAt: ctx.Now.UTC(), Reason: nonEmpty(p.Reason), DroppedEvents: dropped,
 			}))
+			carried = dropped
 		}
 	}
 	if err := a.Emit(events...); err != nil {
+		return err
+	}
+	if err := a.Queue.ConsumeDropped(carried); err != nil {
 		return err
 	}
 	return commit()

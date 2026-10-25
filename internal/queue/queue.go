@@ -241,6 +241,20 @@ func (q *Queue) TakeDropped() int64 {
 	return n
 }
 
+// ConsumeDropped subtracts n from the dropped count once an event carrying
+// n has been queued; drops counted since it was read are kept.
+//
+// @spec: event-queue-and-backfill#dropped-events-reported
+func (q *Queue) ConsumeDropped(n int64) error {
+	if n == 0 {
+		return nil
+	}
+	return q.withState(func(st *State) error {
+		st.DroppedEvents = max(st.DroppedEvents-n, 0)
+		return nil
+	})
+}
+
 // RecordDroppedFields counts fields the allowlist removed, by name, in the
 // agent's local diagnostics.
 //

@@ -99,14 +99,15 @@ func Identify(dir string) Identity {
 	if b, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
 		id.Branch = &b
 	}
-	cfg := readConfig(filepath.Join(commonDir, "config"))
+	env := includeEnv{gitDirs: []string{gitDir, commonDir}, branch: id.Branch}
+	cfg := readConfig(filepath.Join(commonDir, "config"), env)
 	id.Repo = ParseRemoteURL(cfg.remoteURL(id.Branch))
 	email := cfg.userEmail
 	for _, g := range globalConfigs() {
 		if email != "" {
 			break
 		}
-		email = readConfig(g).userEmail
+		email = readConfig(g, env).userEmail
 	}
 	if email != "" {
 		id.UserEmail = &email
@@ -192,13 +193,29 @@ func (c gitConfig) remoteURL(branch *string) string {
 	return ""
 }
 
-// readConfig reads the remote URLs and branch remotes from a git config file.
-// It handles the subset of git's config syntax those keys use.
-func readConfig(path string) gitConfig {
+// includeEnv is what conditional includes are evaluated against.
+type includeEnv struct {
+	gitDirs []string // the repository's git dir and common dir
+	branch  *string
+}
+
+// readConfig reads remote URLs, branch remotes, and user.email from a git
+// config file, following include.path and includeIf (gitdir:, gitdir/i:,
+// onbranch:) where they appear, as git does. Other conditions are not
+// evaluated and their includes are skipped.
+func readConfig(path string, env includeEnv) gitConfig {
 	cfg := gitConfig{remoteURLs: map[string]string{}, branchRemote: map[string]string{}}
+	cfg.parse(path, env, 0)
+	return cfg
+}
+
+func (cfg *gitConfig) parse(path string, env includeEnv, depth int) {
+	if depth > 10 {
+		return
+	}
 	f, err := os.Open(path)
 	if err != nil {
-		return cfg
+		return
 	}
 	defer f.Close()
 	var section, sub string
@@ -238,9 +255,118 @@ func readConfig(path string) gitConfig {
 			cfg.branchRemote[sub] = value
 		case section == "user" && sub == "" && key == "email":
 			cfg.userEmail = value // the last value wins, as in git
+		case key == "path" && (section == "include" && sub == "" || section == "includeif" && env.matches(sub, path)):
+			cfg.parse(includePath(value, path), env, depth+1)
 		}
 	}
-	return cfg
+}
+
+func homeDir() string {
+	h, _ := os.UserHomeDir()
+	return h
+}
+
+// includePath resolves an include path against the including file.
+func includePath(p, from string) string {
+	if rest, ok := strings.CutPrefix(p, "~/"); ok {
+		return filepath.Join(homeDir(), rest)
+	}
+	if !filepath.IsAbs(p) {
+		return filepath.Join(filepath.Dir(from), p)
+	}
+	return p
+}
+
+// matches evaluates an includeIf condition.
+func (env includeEnv) matches(cond, from string) bool {
+	kind, pattern, ok := strings.Cut(cond, ":")
+	if !ok || pattern == "" {
+		return false
+	}
+	switch kind {
+	case "gitdir", "gitdir/i":
+		fold := kind == "gitdir/i"
+		if rest, ok := strings.CutPrefix(pattern, "~/"); ok {
+			pattern = filepath.Join(homeDir(), rest) + suffixSlash(pattern)
+		} else if rest, ok := strings.CutPrefix(pattern, "./"); ok {
+			pattern = filepath.Join(filepath.Dir(from), rest) + suffixSlash(pattern)
+		} else if !strings.HasPrefix(pattern, "/") {
+			pattern = "**/" + pattern
+		}
+		if strings.HasSuffix(pattern, "/") {
+			pattern += "**"
+		}
+		for _, p := range []string{pattern, resolvePrefix(pattern)} {
+			for _, d := range env.gitDirs {
+				if globMatch(p, filepath.ToSlash(d), fold) || globMatch(p, filepath.ToSlash(d)+"/", fold) {
+					return true
+				}
+			}
+		}
+	case "onbranch":
+		if env.branch == nil {
+			return false
+		}
+		if strings.HasSuffix(pattern, "/") {
+			pattern += "**"
+		}
+		return globMatch(pattern, *env.branch, false)
+	}
+	return false
+}
+
+func suffixSlash(p string) string {
+	if strings.HasSuffix(p, "/") {
+		return "/"
+	}
+	return ""
+}
+
+// resolvePrefix resolves symlinks in a pattern's leading literal directory,
+// so /var/x/** also matches a git dir reported as /private/var/x/....
+func resolvePrefix(pattern string) string {
+	i := strings.IndexAny(pattern, "*?[")
+	if i < 0 {
+		i = len(pattern)
+	}
+	dir := pattern[:strings.LastIndexByte(pattern[:i], '/')+1]
+	if dir == "" {
+		return pattern
+	}
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return pattern
+	}
+	return filepath.ToSlash(real) + "/" + pattern[len(dir):]
+}
+
+// globMatch matches git's wildmatch subset: ** across directories, * and ?
+// within one.
+func globMatch(pattern, s string, fold bool) bool {
+	var re strings.Builder
+	re.WriteString("^")
+	if fold {
+		re.WriteString("(?i)")
+	}
+	for i := 0; i < len(pattern); i++ {
+		switch c := pattern[i]; {
+		case strings.HasPrefix(pattern[i:], "**/"):
+			re.WriteString("(?:.*/)?")
+			i += 2
+		case strings.HasPrefix(pattern[i:], "**"):
+			re.WriteString(".*")
+			i++
+		case c == '*':
+			re.WriteString("[^/]*")
+		case c == '?':
+			re.WriteString("[^/]")
+		default:
+			re.WriteString(regexp.QuoteMeta(string(c)))
+		}
+	}
+	re.WriteString("$")
+	m, err := regexp.MatchString(re.String(), s)
+	return err == nil && m
 }
 
 // unquote parses a git config value as git does: double-quoted spans are
