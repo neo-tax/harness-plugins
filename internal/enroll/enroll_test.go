@@ -189,7 +189,7 @@ func TestMissingInputListsWhatIsNeeded(t *testing.T) {
 		t.Fatalf("err %v", err)
 	}
 	out := f.out.String()
-	for _, want := range []string{"enrollment token", "--token", "--email", "engineer@example.com", "account@example.com"} {
+	for _, want := range []string{"enrollment token", "--token", "--email", "Engineer@Example.com", "account@example.com"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}

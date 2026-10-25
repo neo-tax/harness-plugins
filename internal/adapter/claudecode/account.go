@@ -11,16 +11,6 @@ import (
 // Harness is the harness name carried on every event from this adapter.
 const Harness = "claude-code"
 
-// ConfigDir is Claude Code's configuration directory: $CLAUDE_CONFIG_DIR, or
-// ~/.claude.
-func ConfigDir() string {
-	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
-		return d
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claude")
-}
-
 // accountFile is where Claude Code keeps the signed-in account.
 func accountFile() string {
 	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {

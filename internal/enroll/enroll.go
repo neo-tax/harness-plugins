@@ -127,10 +127,10 @@ func Login(ctx context.Context, o Options) error {
 	if o.Out == nil {
 		o.Out = io.Discard
 	}
-	candidates := emailCandidates(o.AccountEmail)
 	token, email := strings.TrimSpace(o.Token), strings.TrimSpace(o.Email)
 
 	if token == "" || email == "" {
+		candidates := emailCandidates(ctx, o.AccountEmail)
 		if !o.Interactive {
 			writeInstructions(o.Out, token == "", email == "", candidates)
 			return ErrNeedInput
@@ -196,7 +196,7 @@ func Login(ctx context.Context, o Options) error {
 // email, de-duplicated case-insensitively, in that order.
 //
 // @spec: device-enrollment#email-candidates
-func emailCandidates(account func() string) []string {
+func emailCandidates(ctx context.Context, account func() string) []string {
 	var out []string
 	add := func(e string) {
 		e = strings.TrimSpace(e)
@@ -210,8 +210,10 @@ func emailCandidates(account func() string) []string {
 		}
 		out = append(out, e)
 	}
-	if b, err := exec.Command("git", "config", "--global", "user.email").Output(); err == nil {
-		add(strings.ToLower(string(b)))
+	gctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if b, err := exec.CommandContext(gctx, "git", "config", "--global", "user.email").Output(); err == nil {
+		add(string(b))
 	}
 	if account != nil {
 		add(account())
