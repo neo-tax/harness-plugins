@@ -39,8 +39,8 @@ func TestParseRemoteURL(t *testing.T) {
 		"../sibling":                                                           nil,
 		"https://gitserver/team/repo":                                          {Host: "gitserver", Owner: "team", Name: "repo"},
 		"http://localhost:3000/owner/repo":                                     {Host: "localhost", Owner: "owner", Name: "repo"},
-		"gh:neo-tax/harness-plugins": {Host: "gh", Owner: "neo-tax", Name: "harness-plugins"},
-		"git@github-work:Neo-Tax/Repo.git": {Host: "github-work", Owner: "neo-tax", Name: "repo"}
+		"gh:neo-tax/harness-plugins":                                           {Host: "gh", Owner: "neo-tax", Name: "harness-plugins"},
+		"git@github-work:Neo-Tax/Repo.git":                                     {Host: "github-work", Owner: "neo-tax", Name: "repo"},
 		"https://github.com/onlyowner":                                         nil,
 		"":                                                                     nil,
 	}
