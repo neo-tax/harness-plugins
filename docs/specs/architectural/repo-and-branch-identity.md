@@ -9,6 +9,7 @@ version: 2
 affects:
   - internal/gitident/*.go
   - internal/allowlist/allowlist.go
+  - internal/adapter/claudecode/hooks.go
 ---
 
 # Repository and branch identity
@@ -26,10 +27,8 @@ Governs how the agent derives the `repo`, `branch`, and `head_sha` fields from t
 - `branch-exact`(tested): `branch` is the current branch name with case preserved, and is null on a detached HEAD.
 - `head-sha`(tested): `head_sha` is the full commit hash HEAD points at.
 - `worktree-resolves-to-main-repo`(tested): A working directory inside a linked git worktree resolves to the same `repo` as the main checkout.
-- `single-git-invocation`(built): The agent obtains all three values with one git process invocation per hook.
-  - status-reason: Identify runs one git process and a test proves it; the per-hook claim is covered once hooks call it (PLAT-673)
-- `git-failure-is-null`(built): When git is absent or the invocation fails, all three fields are null and the event is still emitted.
-  - status-reason: Identify returns all-null on git failure and a test proves it; that the event is still emitted is covered once hooks call it (PLAT-673)
+- `single-git-invocation`(tested): The agent obtains all three values with one git process invocation per hook.
+- `git-failure-is-null`(tested): When git is absent or the invocation fails, all three fields are null and the event is still emitted.
 - `cwd-never-sent`(tested): The working-directory path itself is never included in any event.
 
 ## Design Notes

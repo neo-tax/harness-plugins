@@ -1,0 +1,12 @@
+{
+  "name": "neo-tax",
+  "version": "0.1.0",
+  "description": "Reports Claude Code session metadata (token usage, model, repository, branch) to Neo.Tax. No prompts, code, or file paths leave the machine.",
+  "author": {
+    "name": "Neo.Tax",
+    "email": "support@neo.tax"
+  },
+  "homepage": "https://github.com/neo-tax/harness-plugins",
+  "repository": "https://github.com/neo-tax/harness-plugins",
+  "license": "UNLICENSED"
+}

@@ -16,6 +16,7 @@ affects:
   - internal/agent/*.go
   - internal/queue/*.go
   - contract/contract.go
+  - internal/adapter/claudecode/hooks.go
 ---
 
 # Field allowlist
@@ -34,7 +35,7 @@ Governs the single list of fields the agent is permitted to emit, how it is enfo
 - `content-excluded`(tested): Prompt text, completion text, tool inputs, tool outputs, and file paths are not on the allowlist for any event kind.
 - `request-id-included`(tested): The vendor's API request id is on the allowlist for `session.turn`.
 - `git-user-email-included`(tested): The repository-level git `user.email` is on the allowlist for `session.opened` only.
-- `content-bearing-payloads-reduced`(approved): A hook payload that carries model output is reduced to its usage counts inside the agent before any of it is written to disk.
+- `content-bearing-payloads-reduced`(tested): A hook payload that carries model output is reduced to its usage counts inside the agent before any of it is written to disk.
 - `privacy-statement-generated`(tested): The published privacy statement's field table is generated from the allowlist in code, and CI fails when the committed statement differs from the generated one.
 - `statement-per-event-kind`(tested): The generated statement lists, per event kind, every field and a one-line description of what it contains.
 - `statement-names-identity-line`(tested): The statement names the two values meant to identify the engineer: the email the engineer confirms at enrollment and the repository-level git email as a join signal.

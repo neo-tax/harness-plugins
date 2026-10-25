@@ -28,7 +28,8 @@ var Version = "dev"
 const usage = `usage: neo-tax-agent <command> [flags]
 
 commands:
-  login      enroll this device with an enrollment token
+  hook <name>  handle a harness hook; the payload is read from standard input
+  login        enroll this device with an enrollment token
   version    print the agent version
 `
 
@@ -47,6 +48,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	case "login":
 		return login(args[1:], stdin, stdout, stderr)
+	case "hook":
+		return hook(args[1:], stdin)
 	default:
 		fmt.Fprint(stderr, usage)
 		return 2
@@ -62,6 +65,22 @@ func dataDir(flagValue string) string {
 		return d
 	}
 	return os.Getenv("CLAUDE_PLUGIN_DATA")
+}
+
+// hook handles one Claude Code hook. It always exits 0: a hook must never
+// fail the engineer's session.
+func hook(args []string, stdin io.Reader) int {
+	if len(args) < 1 {
+		return 0
+	}
+	d := dataDir("")
+	if d == "" {
+		return 0
+	}
+	claudecode.RunHook(context.Background(), args[0], stdin, claudecode.HookOptions{
+		DataDir: d, AgentVersion: Version, Entrypoint: os.Getenv("CLAUDE_CODE_ENTRYPOINT"),
+	})
+	return 0
 }
 
 func login(args []string, stdin io.Reader, stdout, stderr io.Writer) int {

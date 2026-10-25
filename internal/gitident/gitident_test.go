@@ -355,3 +355,23 @@ func TestSymlinkedSubdirectoryResolves(t *testing.T) {
 		t.Fatalf("%+v", id.Repo)
 	}
 }
+
+// The effective user.email for the repository: its own config first, then
+// the engineer's global config, read without another git process.
+// @spec: field-allowlist#git-user-email-included
+func TestUserEmail(t *testing.T) {
+	dir := newRepo(t)
+	global := filepath.Join(t.TempDir(), "gitconfig")
+	os.WriteFile(global, []byte("[user]\n\tname = X\n\temail = global@example.com\n"), 0o600)
+	t.Setenv("GIT_CONFIG_GLOBAL", global)
+	if got := str(gitident.Identify(dir).UserEmail); got != "global@example.com" {
+		t.Errorf("global: %s", got)
+	}
+	git(t, dir, "config", "user.email", "Repo@Example.com")
+	if got := str(gitident.Identify(dir).UserEmail); got != "Repo@Example.com" {
+		t.Errorf("repo: %s", got)
+	}
+	if id := gitident.Identify(t.TempDir()); id.UserEmail != nil {
+		t.Errorf("outside git: %s", str(id.UserEmail))
+	}
+}

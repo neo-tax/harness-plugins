@@ -1,0 +1,19 @@
+{
+  "name": "neo-tax",
+  "owner": {
+    "name": "Neo.Tax",
+    "email": "support@neo.tax"
+  },
+  "metadata": {
+    "description": "Neo.Tax plugins that report AI coding session metadata so AI spend can be attributed to the pull requests and tickets it produced.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "neo-tax",
+      "source": "./plugins/claude-code",
+      "description": "Reports Claude Code session metadata (token usage, model, repository, branch) to Neo.Tax. No prompts, code, or file paths leave the machine.",
+      "version": "0.1.0"
+    }
+  ]
+}
