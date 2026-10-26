@@ -554,6 +554,23 @@ func TestBackfillLeavesSessionsWithStaleTotalsOpen(t *testing.T) {
 	}
 }
 
+// A subagent transcript that cannot be read leaves turns out; subtracting
+// too few would over-report side usage, so the session gets no close.
+// @spec: event-queue-and-backfill#backfill-closes-ended-sessions
+func TestBackfillDoesNotCloseAPartlyReadSession(t *testing.T) {
+	h := newHookEnv(t, true)
+	root := projects(t, h.repo)
+	appendTo(t, filepath.Join(root, "projects", "-some-project", "11111111-1111-4111-8111-111111111111.jsonl"),
+		costState(1, map[string]map[string]int64{"claude-haiku-5-5": {"inputTokens": 905}}))
+	os.MkdirAll(filepath.Join(root, "projects", "-some-project", "11111111-1111-4111-8111-111111111111", "subagents", "agent-bad.jsonl"), 0o700)
+	h.backfill(root)
+	for _, e := range h.recorded() {
+		if e["event_kind"] == "session.closed" {
+			t.Fatalf("closed %v", e)
+		}
+	}
+}
+
 // A transcript's file name becomes its session id, so a file under projects/
 // that Claude Code did not name, such as a hand-made backup, is skipped and
 // its name never reaches an event.

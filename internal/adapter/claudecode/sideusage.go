@@ -157,7 +157,8 @@ func (s *totalsScan) totals() map[string]modelTotals {
 	totals := map[string]modelTotals{}
 	for _, c := range s.tallies {
 		for model, m := range c.ModelUsage {
-			totals[model] = totals[model].add(m.counts())
+			k := modelKey(model)
+			totals[k] = totals[k].add(m.counts())
 		}
 	}
 	return totals
@@ -184,17 +185,29 @@ func sideUsage(ctx Context, mainPath string, wait time.Duration) ([]contract.Sid
 	if err != nil || !scan.current {
 		return nil, err
 	}
-	totals := map[string]modelTotals{}
-	for model, t := range scan.totals() {
-		k := modelKey(model)
-		totals[k] = totals[k].add(t)
-	}
 	res, _, err := tailWith(ctx, mainPath, nil)
 	if err != nil {
 		return nil, err
 	}
+	return lessTurns(scan.totals(), res.Events), nil
+}
+
+// currentTotals is the session's totals when its transcript ends with
+// current ones, without waiting; ok is false otherwise.
+func currentTotals(mainPath string) (map[string]modelTotals, bool) {
+	scan := &totalsScan{path: mainPath, tallies: map[int64]costState{}}
+	if scan.advance() != nil || !scan.current {
+		return nil, false
+	}
+	return scan.totals(), true
+}
+
+// lessTurns is totals less the usage of the given events' turns, per model
+// and count, clamped at zero, with all-zero models left out. It is nil
+// (unknown) when totals and turns name a model differently.
+func lessTurns(totals map[string]modelTotals, events []any) []contract.SideUsage {
 	turns := map[string]contract.SideUsage{}
-	for _, ev := range res.Events {
+	for _, ev := range events {
 		t, ok := ev.(contract.Turn)
 		if !ok || t.Model == nil {
 			continue
@@ -203,7 +216,7 @@ func sideUsage(ctx Context, mainPath string, wait time.Duration) ([]contract.Sid
 		turns[k] = add(turns[k], turnCounts(t.Usage))
 	}
 	if !joined(totals, turns) {
-		return nil, nil
+		return nil
 	}
 	out := []contract.SideUsage{}
 	for model, total := range totals {
@@ -214,7 +227,7 @@ func sideUsage(ctx Context, mainPath string, wait time.Duration) ([]contract.Sid
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Model < out[j].Model })
-	return out, nil
+	return out
 }
 
 // modelKey is a model name without a trailing bracketed suffix. Claude Code

@@ -549,7 +549,7 @@ func backfillOne(a *agent.Agent, path, deviceID string, o BackfillOptions) (int,
 	if v := moves[path].Version; v != "" {
 		endVersion = v
 	}
-	if c, ok := backfillClose(ctx, path, endVersion); ok {
+	if c, ok := backfillClose(ctx, path, endVersion, res.Events, err); ok {
 		events = append(events, c)
 	}
 	if err := a.Emit(events...); err != nil {
@@ -560,15 +560,21 @@ func backfillOne(a *agent.Agent, path, deviceID string, o BackfillOptions) (int,
 
 // backfillClose is a past session's session.closed, when its transcript
 // ends with current session totals: a clean exit. It carries the side usage
-// no turn reports, and is timestamped from the transcript so a re-run sends
-// the same event.
+// no turn reports, computed from the session's turns as read, and is
+// timestamped from the transcript so a re-run sends the same event. A read
+// that failed for any of the session's transcripts left turns out, and
+// subtracting too few would over-report, so it gets no close.
 //
 // @spec: event-queue-and-backfill#backfill-closes-ended-sessions
-func backfillClose(ctx Context, path, version string) (contract.Closed, bool) {
-	side, err := sideUsage(ctx, path, 0)
-	if err != nil || side == nil {
+func backfillClose(ctx Context, path, version string, turns []any, readErr error) (contract.Closed, bool) {
+	if readErr != nil {
 		return contract.Closed{}, false
 	}
+	totals, ok := currentTotals(path)
+	if !ok {
+		return contract.Closed{}, false
+	}
+	side := lessTurns(totals, turns)
 	ended, err := latestTimestamp(path)
 	if err != nil || ended.IsZero() {
 		return contract.Closed{}, false
