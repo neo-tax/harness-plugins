@@ -40,7 +40,7 @@ No prompt text, completion text, tool inputs, file paths, working-directory path
 
 ## Trying it locally
 
-`scripts/dev.sh` runs the plugin from your working tree against the fake ingest server, so nothing reaches Neo.Tax. It needs `go`, `jq`, and `claude`.
+`scripts/dev.sh` runs the plugin from your working tree against the fake ingest server, so nothing reaches Neo.Tax. It needs `go`, `jq`, `curl`, and `claude`.
 
 ```sh
 scripts/dev.sh up          # build, start the fake server, install the plugin, enroll

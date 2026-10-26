@@ -19,7 +19,7 @@
 #   scripts/dev.sh down [--clean]     Stop the servers and uninstall the
 #       plugin; --clean also deletes .dev (and the throwaway Claude login).
 #
-# Needs go, jq, and claude. Ports: NEO_TAX_DEV_PORT (8787) and
+# Needs go, jq, curl, and claude. Ports: NEO_TAX_DEV_PORT (8787) and
 # NEO_TAX_AUDIT_PORT (8788).
 set -eu
 
@@ -87,7 +87,7 @@ up() {
       *) die "unknown flag $a" ;;
     esac
   done
-  need go; need jq; need claude
+  need go; need jq; need curl; need claude
   mkdir -p "$dev/bin"
   echo "$port" >"$dev/port"
   echo "$audit_port" >"$dev/audit-port"
