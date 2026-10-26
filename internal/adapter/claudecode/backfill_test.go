@@ -563,11 +563,26 @@ func TestBackfillDoesNotCloseAPartlyReadSession(t *testing.T) {
 	appendTo(t, filepath.Join(root, "projects", "-some-project", "11111111-1111-4111-8111-111111111111.jsonl"),
 		costState(1, map[string]map[string]int64{"claude-haiku-5-5": {"inputTokens": 905}}))
 	os.MkdirAll(filepath.Join(root, "projects", "-some-project", "11111111-1111-4111-8111-111111111111", "subagents", "agent-bad.jsonl"), 0o700)
-	h.backfill(root)
+	if _, err := h.backfill(root); err != nil {
+		t.Fatal(err)
+	}
+	// The session itself was backfilled from what could be read.
+	var opened, turns int
 	for _, e := range h.recorded() {
-		if e["event_kind"] == "session.closed" {
+		if e["session_id"] != "11111111-1111-4111-8111-111111111111" {
+			continue
+		}
+		switch e["event_kind"] {
+		case "session.opened":
+			opened++
+		case "session.turn":
+			turns++
+		case "session.closed":
 			t.Fatalf("closed %v", e)
 		}
+	}
+	if opened != 1 || turns == 0 {
+		t.Fatalf("11111111-1111-4111-8111-111111111111 opened %d, turns %d: not backfilled", opened, turns)
 	}
 }
 
