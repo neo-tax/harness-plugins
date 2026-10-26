@@ -102,12 +102,6 @@ up() {
     if [ "$force" = 0 ] && ! my_config_up && neo_tax_installed; then
       die "neo-tax is already installed in ${CLAUDE_CONFIG_DIR:-~/.claude}; --my-config would replace it and down would delete its enrollment and queued events. Pass --force to proceed."
     fi
-    : >"$dev/config-dir"
-    echo "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" >"$dev/my-config-dir"
-  else
-    rm -f "$dev/my-config-dir"
-    mkdir -p "$dev/claude"
-    echo "$dev/claude" >"$dev/config-dir"
   fi
 
   echo "dev: building"
@@ -140,6 +134,16 @@ up() {
   mkdir -p "$market/.claude-plugin"
   cp -R "$repo/plugins" "$market/"
   jq '.plugins[0].source = "./plugins/claude-code"' "$repo/.claude-plugin/marketplace.json" >"$market/.claude-plugin/marketplace.json"
+  # Recorded only now, so a run that fails earlier leaves no claim on an
+  # install it never made.
+  if [ "$my_config" = 1 ]; then
+    : >"$dev/config-dir"
+    echo "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" >"$dev/my-config-dir"
+  else
+    rm -f "$dev/my-config-dir"
+    mkdir -p "$dev/claude"
+    echo "$dev/claude" >"$dev/config-dir"
+  fi
   with_config claude plugin marketplace remove neo-tax >/dev/null 2>&1 || true
   with_config claude plugin marketplace add "$market" >/dev/null
   with_config claude plugin install neo-tax@neo-tax >/dev/null
