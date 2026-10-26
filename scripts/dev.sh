@@ -42,9 +42,13 @@ with_config() {
   if [ -n "$c" ]; then CLAUDE_CONFIG_DIR="$c" "$@"; else "$@"; fi
 }
 
+# Whether a stack from `up --my-config` is up: config-dir exists and is empty.
+my_config_up() { [ -f "$dev/config-dir" ] && [ ! -s "$dev/config-dir" ] && [ -f "$dev/my-config-dir" ]; }
+
 # After `up --my-config`, every command must act on the directory it checked
 # and installed into, never one a different CLAUDE_CONFIG_DIR resolves to.
 check_my_config() {
+  my_config_up || return 0
   mine=$(cat "$dev/my-config-dir" 2>/dev/null || true)
   if [ -n "$mine" ] && [ "$mine" != "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" ]; then
     die "up --my-config used $mine; run this with the same CLAUDE_CONFIG_DIR"
@@ -93,14 +97,15 @@ up() {
     [ "$was_mine" = "$my_config" ] || die "the stack is up in the other mode; run scripts/dev.sh down first"
   fi
   if [ "$my_config" = 1 ]; then
-    # A recorded my-config-dir (checked to match) means the install there is
-    # a previous `up`'s.
-    if [ "$force" = 0 ] && [ ! -f "$dev/my-config-dir" ] && neo_tax_installed; then
+    # A --my-config stack already up (checked to match) means the install
+    # there is its own.
+    if [ "$force" = 0 ] && ! my_config_up && neo_tax_installed; then
       die "neo-tax is already installed in ${CLAUDE_CONFIG_DIR:-~/.claude}; --my-config would replace it and down would delete its enrollment and queued events. Pass --force to proceed."
     fi
     : >"$dev/config-dir"
     echo "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" >"$dev/my-config-dir"
   else
+    rm -f "$dev/my-config-dir"
     mkdir -p "$dev/claude"
     echo "$dev/claude" >"$dev/config-dir"
   fi
