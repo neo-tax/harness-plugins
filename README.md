@@ -38,6 +38,23 @@ No prompt text, completion text, tool inputs, file paths, working-directory path
 - `docs/specs/architectural/` holds one spec per subsystem: the wire contract, device enrollment, the Claude Code transcript parser, repository and branch identity, the event queue and backfill, the field allowlist, and test and release. Each requirement line carries a status; where code and spec disagree, the code is wrong.
 - `AGENTS.md` is the operating guide for anyone, human or agent, making changes.
 
+## Trying it locally
+
+`scripts/dev.sh` runs the plugin from your working tree against the fake ingest server, so nothing reaches Neo.Tax. It needs `go`, `jq`, and `claude`.
+
+```sh
+scripts/dev.sh up          # build, start the fake server, install the plugin, enroll
+scripts/dev.sh claude      # Claude Code wired to the stack; log in to Claude the first time
+scripts/dev.sh events -f   # in another terminal: each event as it arrives
+scripts/dev.sh down        # stop and uninstall; --clean also deletes .dev/
+```
+
+Claude Code runs from a throwaway config directory under `.dev/`, so your own sessions and plugins are untouched. `up --my-config` installs into your real `~/.claude` instead, and enrolling then backfills your past sessions to the fake server.
+
+To check token counts against the API's own, start with `up --audit`. Claude Code then talks to the API through a local proxy that logs the usage of every request (ids and counts only, never content), and `scripts/dev.sh audit` reports the requests no `session.turn` accounted for and any counts that differ.
+
+`go test ./...` runs everything else; `scripts/smoke-test.sh` is the scripted install check CI runs.
+
 ## Installing (once released)
 
 Per engineer, from inside Claude Code:
