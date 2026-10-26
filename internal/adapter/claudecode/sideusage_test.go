@@ -185,6 +185,45 @@ func TestSessionEndWaitsPastAnOlderCostState(t *testing.T) {
 	}
 }
 
+// A resumed session that exits with no new assistant message still wrote
+// lines of its own after the earlier exit's totals, so those are stale too.
+// @spec: claude-code-transcript-parser#side-usage-null-without-totals
+func TestSessionEndWaitsPastTotalsFollowedByAnyLine(t *testing.T) {
+	defer setCostStateWait(5 * time.Second)()
+	h := newHookEnv(t, true)
+	h.appendLines(
+		costState(1, map[string]map[string]int64{"claude-haiku-5-5": {"inputTokens": 900}}),
+		`{"type":"last-prompt","sessionId":"fixture-session"}`,
+	)
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		h.appendLines(costState(2, map[string]map[string]int64{"claude-haiku-5-5": {"inputTokens": 305}}))
+	}()
+	h.run("SessionEnd", map[string]any{"reason": "other"})
+	// Tallies 1 and 2 sum to 1205 input, less the turns' 5.
+	want := []any{entry("claude-haiku-5-5", 1200, 0, 0, 0, 0)}
+	if got := h.closed()["side_usage"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("side_usage %v, want %v", got, want)
+	}
+}
+
+// Claude Code can write an artifact-comment-monitor line after its exit
+// totals; that does not make them stale.
+// @spec: claude-code-transcript-parser#side-usage-null-without-totals
+func TestSessionEndTotalsStayCurrentAfterExitLines(t *testing.T) {
+	defer setCostStateWait(50 * time.Millisecond)()
+	h := newHookEnv(t, true)
+	h.appendLines(
+		costState(1, map[string]map[string]int64{"claude-haiku-5-5": {"inputTokens": 905}}),
+		`{"type":"artifact-comment-monitor","sessionId":"fixture-session"}`,
+	)
+	h.run("SessionEnd", map[string]any{"reason": "other"})
+	want := []any{entry("claude-haiku-5-5", 900, 0, 0, 0, 0)}
+	if got := h.closed()["side_usage"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("side_usage %v, want %v", got, want)
+	}
+}
+
 func setCostStateWait(d time.Duration) func() {
 	old := claudecode.CostStateWait
 	claudecode.CostStateWait = d

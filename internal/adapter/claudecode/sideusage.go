@@ -2,6 +2,7 @@ package claudecode
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"io"
 	"os"
@@ -54,9 +55,10 @@ func (m costStateModel) counts() contract.SideUsage {
 // totalsScan reads a main transcript's cost-state lines incrementally. Each
 // process that opens a session keeps its own tally, identified by its start
 // time, and each line holds that tally so far; the session's totals are the
-// latest line of each tally, summed. The totals are current only when the
-// latest cost-state line follows the last assistant message: an older one
-// (a resumed session's earlier exit) predates the turns since.
+// latest line of each tally, summed. The totals are current only when no
+// other line follows the latest cost-state line, apart from the lines Claude
+// Code writes after exiting: anything else means a later process (a resumed
+// session) has run since, and those totals leave it out.
 type totalsScan struct {
 	path    string
 	offset  int64
@@ -84,21 +86,20 @@ func (s *totalsScan) advance() error {
 			return err
 		}
 		s.offset += int64(len(raw))
-		var l struct {
-			Type string `json:"type"`
-		}
-		if json.Unmarshal(raw, &l) != nil {
+		// Most lines name neither type, and are told apart without decoding.
+		var l costState
+		if !bytes.Contains(raw, []byte(`"cost-state"`)) && !bytes.Contains(raw, []byte(`"artifact-comment-monitor"`)) ||
+			json.Unmarshal(raw, &l) != nil {
+			s.current = false
 			continue
 		}
 		switch l.Type {
-		case "assistant":
-			s.current = false
 		case "cost-state":
-			var c costState
-			if json.Unmarshal(raw, &c) == nil {
-				s.tallies[c.StartTime] = c
-				s.current = true
-			}
+			s.tallies[l.StartTime] = l
+			s.current = true
+		case "artifact-comment-monitor":
+		default:
+			s.current = false
 		}
 	}
 }
