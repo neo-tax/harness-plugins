@@ -229,3 +229,19 @@ func setCostStateWait(d time.Duration) func() {
 	claudecode.CostStateWait = d
 	return func() { claudecode.CostStateWait = old }
 }
+
+// A real session with a title, an away recap, and a /compact. Its expected
+// side usage is what a recording proxy logged for the three API requests no
+// turn reported, independent of the transcript.
+// @spec: claude-code-transcript-parser#side-usage-is-totals-minus-turns
+// @spec: claude-code-transcript-parser#session-totals-from-cost-state
+// @spec: claude-code-transcript-parser#fixture-driven
+func TestSessionEndSideUsageMatchesTheAPI(t *testing.T) {
+	h := newHookEnv(t, true)
+	h.transcript, _ = copyFixture(t, "testdata/fixtures/real-2.1.310-side-usage")
+	h.run("SessionEnd", map[string]any{"reason": "prompt_input_exit"})
+	want := []any{entry("claude-opus-5-5", 4076, 2956, 0, 935, 151837)}
+	if got := h.closed()["side_usage"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("side_usage %v, want %v", got, want)
+	}
+}
