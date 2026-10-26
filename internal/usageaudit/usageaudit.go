@@ -327,9 +327,12 @@ func Compare(records []Record, events []json.RawMessage) (Report, error) {
 		if err := json.Unmarshal(raw, &e); err != nil {
 			return Report{}, err
 		}
-		// RFC 3339 UTC timestamps order as strings.
-		if e.EventKind == "session.closed" && e.EndedAt >= latestClose[e.SessionID].EndedAt {
-			latestClose[e.SessionID] = e
+		// The latest close with totals supersedes the others; RFC 3339 UTC
+		// timestamps order as strings.
+		if e.EventKind == "session.closed" {
+			if e.SideUsage != nil && e.EndedAt >= latestClose[e.SessionID].EndedAt {
+				latestClose[e.SessionID] = e
+			}
 			continue
 		}
 		if e.EventKind != "session.turn" || e.RequestID == "" {

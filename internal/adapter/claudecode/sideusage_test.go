@@ -137,6 +137,54 @@ func TestSessionEndWaitsForCostState(t *testing.T) {
 	}
 }
 
+func (h *hookEnv) prependLines(lines ...string) {
+	h.t.Helper()
+	b, err := os.ReadFile(h.transcript)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	var head string
+	for _, l := range lines {
+		head += l + "\n"
+	}
+	if err := os.WriteFile(h.transcript, append([]byte(head), b...), 0o644); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+// A resumed session's transcript holds the cost-state line its earlier exit
+// wrote, followed by the turns since. Those totals predate the turns, so
+// subtracting the turns would under-report: with no newer line, side usage
+// is unknown.
+// @spec: claude-code-transcript-parser#side-usage-null-without-totals
+func TestSessionEndIgnoresCostStateOlderThanTheLastTurn(t *testing.T) {
+	defer setCostStateWait(50 * time.Millisecond)()
+	h := newHookEnv(t, true)
+	h.prependLines(costState(1, map[string]map[string]int64{"claude-haiku-5-5": {"inputTokens": 900}}))
+	h.run("SessionEnd", map[string]any{"reason": "other"})
+	if v := h.closed()["side_usage"]; v != nil {
+		t.Fatalf("side_usage %v, want null", v)
+	}
+}
+
+// The line this exit writes, arriving during the wait, is the one used.
+// @spec: claude-code-transcript-parser#side-usage-null-without-totals
+// @spec: claude-code-transcript-parser#session-totals-from-cost-state
+func TestSessionEndWaitsPastAnOlderCostState(t *testing.T) {
+	defer setCostStateWait(5 * time.Second)()
+	h := newHookEnv(t, true)
+	h.prependLines(costState(1, map[string]map[string]int64{"claude-haiku-5-5": {"inputTokens": 900}}))
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		h.appendLines(costState(1, map[string]map[string]int64{"claude-haiku-5-5": {"inputTokens": 1205, "outputTokens": 35}}))
+	}()
+	h.run("SessionEnd", map[string]any{"reason": "other"})
+	want := []any{entry("claude-haiku-5-5", 1200, 29, 0, 0, 0)}
+	if got := h.closed()["side_usage"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("side_usage %v, want %v", got, want)
+	}
+}
+
 func setCostStateWait(d time.Duration) func() {
 	old := claudecode.CostStateWait
 	claudecode.CostStateWait = d

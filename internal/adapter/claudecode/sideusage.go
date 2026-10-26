@@ -2,7 +2,6 @@ package claudecode
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"io"
 	"os"
@@ -52,67 +51,90 @@ func (m costStateModel) counts() contract.SideUsage {
 	return u
 }
 
-// sessionTotals reads the main transcript's cost-state lines. Each process
-// that opens a session keeps its own tally, identified by its start time,
-// and each line holds that tally so far; the session's totals are the
-// latest line of each tally, summed. ok is false when there is no line.
-//
-// @spec: claude-code-transcript-parser#session-totals-from-cost-state
-func sessionTotals(path string) (map[string]contract.SideUsage, bool, error) {
-	f, err := os.Open(path)
+// totalsScan reads a main transcript's cost-state lines incrementally. Each
+// process that opens a session keeps its own tally, identified by its start
+// time, and each line holds that tally so far; the session's totals are the
+// latest line of each tally, summed. The totals are current only when the
+// latest cost-state line follows the last assistant message: an older one
+// (a resumed session's earlier exit) predates the turns since.
+type totalsScan struct {
+	path    string
+	offset  int64
+	tallies map[int64]costState
+	current bool
+}
+
+// advance reads the complete lines written since the last call.
+func (s *totalsScan) advance() error {
+	f, err := os.Open(s.path)
 	if err != nil {
-		return nil, false, err
+		return err
 	}
 	defer f.Close()
-	tallies := map[int64]costState{}
+	if _, err := f.Seek(s.offset, io.SeekStart); err != nil {
+		return err
+	}
 	r := bufio.NewReaderSize(f, 256<<10)
 	for {
 		raw, err := r.ReadBytes('\n')
 		if err == io.EOF {
-			break
+			return nil // a partial last line is read again next time
 		}
 		if err != nil {
-			return nil, false, err
+			return err
 		}
-		if !bytes.Contains(raw, []byte(`"cost-state"`)) {
+		s.offset += int64(len(raw))
+		var l struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(raw, &l) != nil {
 			continue
 		}
-		var c costState
-		if json.Unmarshal(raw, &c) != nil || c.Type != "cost-state" {
-			continue
+		switch l.Type {
+		case "assistant":
+			s.current = false
+		case "cost-state":
+			var c costState
+			if json.Unmarshal(raw, &c) == nil {
+				s.tallies[c.StartTime] = c
+				s.current = true
+			}
 		}
-		tallies[c.StartTime] = c
 	}
-	if len(tallies) == 0 {
-		return nil, false, nil
-	}
+}
+
+func (s *totalsScan) totals() map[string]contract.SideUsage {
 	totals := map[string]contract.SideUsage{}
-	for _, c := range tallies {
+	for _, c := range s.tallies {
 		for model, m := range c.ModelUsage {
 			totals[model] = add(totals[model], m.counts())
 		}
 	}
-	return totals, true, nil
+	return totals
 }
 
 // sideUsage is the usage of the session's API calls that produced no turn:
 // its totals less every turn of the session, per model and count, clamped at
 // zero so a harness that under-records never yields negative usage. It is
-// nil when there are no totals, or when the transcripts could not all be
-// read, since subtracting a partial set of turns would over-report.
+// nil when no current totals appear within CostStateWait, or when the
+// transcripts could not all be read, since subtracting a partial set of
+// turns would over-report.
 //
+// @spec: claude-code-transcript-parser#session-totals-from-cost-state
 // @spec: claude-code-transcript-parser#side-usage-is-totals-minus-turns
 // @spec: claude-code-transcript-parser#side-usage-null-without-totals
 func sideUsage(ctx Context, mainPath string) ([]contract.SideUsage, error) {
 	deadline := time.Now().Add(CostStateWait)
-	totals, ok, err := sessionTotals(mainPath)
-	for err == nil && !ok && time.Now().Before(deadline) {
+	scan := &totalsScan{path: mainPath, tallies: map[int64]costState{}}
+	err := scan.advance()
+	for err == nil && !scan.current && time.Now().Before(deadline) {
 		time.Sleep(100 * time.Millisecond)
-		totals, ok, err = sessionTotals(mainPath)
+		err = scan.advance()
 	}
-	if err != nil || !ok {
+	if err != nil || !scan.current {
 		return nil, err
 	}
+	totals := scan.totals()
 	res, _, err := tailWith(ctx, mainPath, nil)
 	if err != nil {
 		return nil, err

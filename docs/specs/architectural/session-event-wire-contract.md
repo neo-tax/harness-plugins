@@ -35,7 +35,7 @@ Governs every request and response exchanged between the agent and Neo.Tax: the 
 - `pr-opened-fields`(tested): A `session.pr_opened` event carries `repo`, `number`, and `timestamp`.
 - `closed-fields`(tested): A `session.closed` event carries `ended_at`, `reason`, `dropped_events`, and `side_usage`.
 - `side-usage-shape`(tested): `side_usage` is null when the harness recorded no session totals, else an array with at most one entry per model, each carrying `model` and the non-negative integer counts `input`, `output`, `cache_write_5m`, `cache_write_1h`, and `cache_read`.
-- `side-usage-cumulative`(approved): `side_usage` covers the whole session up to that close, so the server takes it from the session's `session.closed` with the latest `ended_at` and never adds two closes' `side_usage` together.
+- `side-usage-cumulative`(approved): `side_usage` covers the whole session up to that close, so the server takes it from the session's `session.closed` with the latest `ended_at` whose `side_usage` is not null, and never adds two closes' `side_usage` together.
 - `repo-shape`(tested): `repo` is either null or an object of `host`, `owner`, and `name`, each lowercase.
 - `subagent-turns-belong-to-parent`(tested): A turn produced by a subagent carries the parent session's `session_id` and a non-null `subagent_id`; a main-thread turn carries a null `subagent_id`.
 - `idempotency-key`(approved): The server treats two events with the same `device_id`, `session_id`, `event_kind`, and `message_id` as the same event; for `session.pr_opened` the key adds `repo` and `number`; for `session.closed` it adds `ended_at`, so a resumed session's later close is kept; for `session.opened`, without a `message_id`, the key uses the event kind alone within the session.

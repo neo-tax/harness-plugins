@@ -152,6 +152,8 @@ func TestCompareCountsSideUsage(t *testing.T) {
 		json.RawMessage(`{"event_kind":"session.closed","session_id":"s","ended_at":"2026-10-26T10:00:00Z","side_usage":[{"model":"claude-haiku-5-5","input":100,"output":1,"cache_write_5m":0,"cache_write_1h":0,"cache_read":0}]}`),
 		json.RawMessage(`{"event_kind":"session.closed","session_id":"s","ended_at":"2026-10-26T11:00:00Z","side_usage":[{"model":"claude-haiku-5-5","input":300,"output":8,"cache_write_5m":0,"cache_write_1h":0,"cache_read":0}]}`),
 		json.RawMessage(`{"event_kind":"session.closed","session_id":"t","ended_at":"2026-10-26T11:00:00Z","side_usage":null}`),
+		// A later close with no totals does not supersede the one before.
+		json.RawMessage(`{"event_kind":"session.closed","session_id":"s","ended_at":"2026-10-26T12:00:00Z","side_usage":null}`),
 	}
 	rep, err := usageaudit.Compare(recs, events)
 	if err != nil {

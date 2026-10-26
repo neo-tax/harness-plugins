@@ -35,7 +35,7 @@ Governs how the Claude Code adapter turns hook payloads and on-disk transcripts 
 - `closed-on-session-end`(tested): `SessionEnd` produces one `session.closed` event with the harness's end reason.
 - `session-totals-from-cost-state`(tested): The session's totals are read from the main transcript's `cost-state` lines: per model, the latest line of each process's tally (lines sharing a `startTime`), summed across tallies.
 - `side-usage-is-totals-minus-turns`(tested): `side_usage` is, per model and per count, the session's totals less the usage of every turn of the session (main thread and subagents, each message counted once), clamped at zero, with models whose counts are all zero left out.
-- `side-usage-null-without-totals`(tested): `side_usage` is null when the main transcript has no `cost-state` line after a bounded wait at `SessionEnd`.
+- `side-usage-null-without-totals`(tested): `side_usage` is null when, after a bounded wait at `SessionEnd`, the main transcript has no `cost-state` line written after its last assistant message, since an older line (from a resumed session's earlier exit) predates the turns since then and would under-report.
 - `side-usage-cache-split`(tested): Session totals split cache creation into five-minute and one-hour counts as the `cost-state` line reports them, and map an unsplit amount to `cache_write_5m`, as turns do.
 - `branch-per-turn`(tested): A turn's `branch` is the transcript's recorded branch for that message when present, else the branch read from the working directory at hook time.
 - `transcript-version-recorded`(tested): The harness version recorded in the transcript is what the envelope's `harness_version` carries.

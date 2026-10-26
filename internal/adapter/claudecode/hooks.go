@@ -124,6 +124,16 @@ func emit(a *agent.Agent, name string, p payload, o HookOptions) error {
 	git := gitident.Identify(p.Cwd)
 	ctx := Context{DeviceID: dev.DeviceID, AgentVersion: o.AgentVersion, SessionID: p.SessionID, Now: o.Now(), Git: git}
 
+	// Side usage only reads transcripts, and may wait for Claude Code to
+	// write its totals, so it runs before the cursor lock is taken.
+	var side []contract.SideUsage
+	if name == "SessionEnd" {
+		var err error
+		if side, err = sideUsage(ctx, p.TranscriptPath); err != nil {
+			agent.Logf(o.DataDir, "hook=%s side usage unavailable: %s", name, errClass(err))
+		}
+	}
+
 	// The cursor lock serializes transcript reads and the dropped count.
 	// When another hook holds it too long, opened and closed are still
 	// emitted, carrying no count. A skipped Stop or PreCompact tail is read
@@ -184,10 +194,6 @@ func emit(a *agent.Agent, name string, p payload, o HookOptions) error {
 			events, commit = res.Events, res.Commit
 		}
 		if name == "SessionEnd" {
-			side, err := sideUsage(ctx, p.TranscriptPath)
-			if err != nil {
-				agent.Logf(o.DataDir, "hook=%s side usage unavailable: %s", name, errClass(err))
-			}
 			// @spec: claude-code-transcript-parser#closed-on-session-end
 			events = append(events, contract.NewClosed(ctx.envelope(lastVersion(p.TranscriptPath, store)), contract.ClosedFields{
 				EndedAt: ctx.Now.UTC(), Reason: nonEmpty(p.Reason), DroppedEvents: dropped, SideUsage: side,
