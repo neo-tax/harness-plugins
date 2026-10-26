@@ -543,10 +543,37 @@ func backfillOne(a *agent.Agent, path, deviceID string, o BackfillOptions) (int,
 		GitUserEmail: git.UserEmail,
 	})
 	events := append([]any{opened}, res.Events...)
+	// The close carries the version the session ended on, as SessionEnd's
+	// does; the read's cursor holds the last one the transcript recorded.
+	endVersion := start.Version
+	if v := moves[path].Version; v != "" {
+		endVersion = v
+	}
+	if c, ok := backfillClose(ctx, path, endVersion); ok {
+		events = append(events, c)
+	}
 	if err := a.Emit(events...); err != nil {
 		return 0, nil, err
 	}
 	return len(events), moves, nil
+}
+
+// backfillClose is a past session's session.closed, when its transcript
+// ends with current session totals: a clean exit. It carries the side usage
+// no turn reports, and is timestamped from the transcript so a re-run sends
+// the same event.
+//
+// @spec: event-queue-and-backfill#backfill-closes-ended-sessions
+func backfillClose(ctx Context, path, version string) (contract.Closed, bool) {
+	side, err := sideUsage(ctx, path, 0)
+	if err != nil || side == nil {
+		return contract.Closed{}, false
+	}
+	ended, err := latestTimestamp(path)
+	if err != nil || ended.IsZero() {
+		return contract.Closed{}, false
+	}
+	return contract.NewClosed(ctx.envelope(version), contract.ClosedFields{EndedAt: ended.UTC(), SideUsage: side}), true
 }
 
 func sessionIDOf(path string) string {

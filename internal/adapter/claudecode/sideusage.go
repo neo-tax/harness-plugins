@@ -166,19 +166,15 @@ func (s *totalsScan) totals() map[string]modelTotals {
 // sideUsage is the usage of the session's API calls that produced no turn:
 // its totals less every turn of the session, per model and count, clamped at
 // zero so a harness that under-records never yields negative usage. It is
-// nil when no current totals appear within CostStateWait (at once, when
-// reason is not an exit), or when the
+// nil when no current totals appear within wait, or when the
 // transcripts could not all be read, since subtracting a partial set of
 // turns would over-report.
 //
 // @spec: claude-code-transcript-parser#session-totals-from-cost-state
 // @spec: claude-code-transcript-parser#side-usage-is-totals-minus-turns
 // @spec: claude-code-transcript-parser#side-usage-null-without-totals
-func sideUsage(ctx Context, mainPath, reason string) ([]contract.SideUsage, error) {
-	deadline := time.Now()
-	if exitReasons[reason] {
-		deadline = deadline.Add(CostStateWait)
-	}
+func sideUsage(ctx Context, mainPath string, wait time.Duration) ([]contract.SideUsage, error) {
+	deadline := time.Now().Add(wait)
 	scan := &totalsScan{path: mainPath, tallies: map[int64]costState{}}
 	err := scan.advance()
 	for err == nil && !scan.current && time.Now().Before(deadline) {
@@ -258,6 +254,32 @@ func joined(totals map[string]modelTotals, turns map[string]contract.SideUsage) 
 		}
 	}
 	return true
+}
+
+// latestTimestamp is the latest timestamp any line of a transcript records.
+func latestTimestamp(path string) (time.Time, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer f.Close()
+	var latest time.Time
+	r := bufio.NewReaderSize(f, 256<<10)
+	for {
+		raw, err := r.ReadBytes('\n')
+		if err == io.EOF {
+			return latest, nil
+		}
+		if err != nil {
+			return time.Time{}, err
+		}
+		var l struct {
+			Timestamp time.Time `json:"timestamp"`
+		}
+		if json.Unmarshal(raw, &l) == nil && l.Timestamp.After(latest) {
+			latest = l.Timestamp
+		}
+	}
 }
 
 func add(a, b contract.SideUsage) contract.SideUsage {

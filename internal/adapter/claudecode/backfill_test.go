@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -489,6 +490,67 @@ func TestBackfillSkipsLegacySubagentTranscripts(t *testing.T) {
 	}
 	if !strings.Contains(out, "2 sessions") {
 		t.Errorf("output %q", out)
+	}
+}
+
+func appendTo(t *testing.T, path string, lines ...string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range lines {
+		f.WriteString(l + "\n")
+	}
+	f.Close()
+	// Keep the transcript's age, which decides backfill order.
+	old := time.Now().Add(-48 * time.Hour)
+	os.Chtimes(path, old, old)
+}
+
+// A past session that exited cleanly gets a session.closed carrying its
+// side usage; one without session totals gets none.
+// @spec: event-queue-and-backfill#backfill-closes-ended-sessions
+func TestBackfillClosesSessionsThatEndedCleanly(t *testing.T) {
+	h := newHookEnv(t, true)
+	root := projects(t, h.repo)
+	appendTo(t, filepath.Join(root, "projects", "-some-project", "11111111-1111-4111-8111-111111111111.jsonl"),
+		costState(1, map[string]map[string]int64{"claude-haiku-5-5": {"inputTokens": 905, "outputTokens": 6, "cacheReadInputTokens": 7}}))
+	if _, err := h.backfill(root); err != nil {
+		t.Fatal(err)
+	}
+	got := h.recorded()
+	if k := strings.Join(kinds(got), ","); k != "session.opened,session.turn,session.opened,session.turn,session.turn,session.pr_opened,session.turn,session.turn,session.closed" {
+		t.Fatalf("recorded %s", k)
+	}
+	c := got[len(got)-1]
+	want := map[string]any{
+		"session_id": "11111111-1111-4111-8111-111111111111", "ended_at": "2026-10-25T10:00:11Z", "reason": nil, "dropped_events": 0.0,
+		"side_usage": []any{entry("claude-haiku-5-5", 900, 0, 0, 0, 0)},
+	}
+	for k, v := range want {
+		if !reflect.DeepEqual(c[k], v) {
+			t.Errorf("closed %s = %v, want %v", k, c[k], v)
+		}
+	}
+}
+
+// Totals followed by other lines belong to an earlier exit of a session
+// that has run since (and may still be running): no close.
+// @spec: event-queue-and-backfill#backfill-closes-ended-sessions
+func TestBackfillLeavesSessionsWithStaleTotalsOpen(t *testing.T) {
+	h := newHookEnv(t, true)
+	root := projects(t, h.repo)
+	appendTo(t, filepath.Join(root, "projects", "-some-project", "11111111-1111-4111-8111-111111111111.jsonl"),
+		costState(1, map[string]map[string]int64{"claude-haiku-5-5": {"inputTokens": 905}}),
+		`{"type":"user","timestamp":"2026-10-25T11:00:00Z","message":{"content":"resumed"}}`)
+	if _, err := h.backfill(root); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range h.recorded() {
+		if e["event_kind"] == "session.closed" {
+			t.Fatalf("closed %v", e)
+		}
 	}
 }
 
