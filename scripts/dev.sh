@@ -39,7 +39,13 @@ config_dir() { cat "$dev/config-dir" 2>/dev/null || true; }
 
 with_config() {
   c=$(config_dir)
-  if [ -n "$c" ]; then CLAUDE_CONFIG_DIR="$c" "$@"; else "$@"; fi
+  if [ -n "$c" ]; then CLAUDE_CONFIG_DIR="$c" "$@"; return; fi
+  # --my-config: act only on the directory `up` checked and installed into.
+  mine=$(cat "$dev/my-config-dir" 2>/dev/null || true)
+  if [ -n "$mine" ] && [ "$mine" != "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" ]; then
+    die "up --my-config used $mine; run this with the same CLAUDE_CONFIG_DIR"
+  fi
+  "$@"
 }
 
 port_free() {
@@ -84,6 +90,7 @@ up() {
       die "neo-tax is already installed in ${CLAUDE_CONFIG_DIR:-~/.claude}; --my-config would replace it and down would delete its enrollment and queued events. Pass --force to proceed."
     fi
     : >"$dev/config-dir"
+    echo "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" >"$dev/my-config-dir"
   else
     mkdir -p "$dev/claude"
     echo "$dev/claude" >"$dev/config-dir"
@@ -184,6 +191,7 @@ down() {
     rm -f "$dev/$p.pid"
   done
   if [ -f "$dev/config-dir" ]; then
+    with_config true
     with_config claude plugin uninstall neo-tax@neo-tax >/dev/null 2>&1 || true
     with_config claude plugin marketplace remove neo-tax >/dev/null 2>&1 || true
     c=$(config_dir)
