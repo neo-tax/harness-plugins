@@ -56,6 +56,14 @@ wait_http() {
   return 1
 }
 
+# Whether the engineer's own config has neo-tax, as Claude Code records it.
+neo_tax_installed() {
+  p="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins"
+  [ -e "$p/data/neo-tax-neo-tax" ] \
+    || jq -e '.plugins // {} | has("neo-tax@neo-tax")' "$p/installed_plugins.json" >/dev/null 2>&1 \
+    || jq -e 'has("neo-tax")' "$p/known_marketplaces.json" >/dev/null 2>&1
+}
+
 up() {
   my_config=0 audit=0 force=0
   for a in "$@"; do
@@ -72,9 +80,8 @@ up() {
   echo "$audit_port" >"$dev/audit-port"
   if [ "$my_config" = 1 ]; then
     # An empty config-dir means the install there is a previous `up`'s.
-    if [ "$force" = 0 ] && ! { [ -f "$dev/config-dir" ] && [ ! -s "$dev/config-dir" ]; } \
-      && { [ -e "$HOME/.claude/plugins/data/neo-tax-neo-tax" ] || [ -e "$HOME/.claude/plugins/marketplaces/neo-tax" ]; }; then
-      die "neo-tax is already installed in ~/.claude; --my-config would replace it and down would delete its enrollment and queued events. Pass --force to proceed."
+    if [ "$force" = 0 ] && ! { [ -f "$dev/config-dir" ] && [ ! -s "$dev/config-dir" ]; } && neo_tax_installed; then
+      die "neo-tax is already installed in ${CLAUDE_CONFIG_DIR:-~/.claude}; --my-config would replace it and down would delete its enrollment and queued events. Pass --force to proceed."
     fi
     : >"$dev/config-dir"
   else
@@ -180,7 +187,7 @@ down() {
     with_config claude plugin uninstall neo-tax@neo-tax >/dev/null 2>&1 || true
     with_config claude plugin marketplace remove neo-tax >/dev/null 2>&1 || true
     c=$(config_dir)
-    rm -rf "${c:-$HOME/.claude}/plugins/data/neo-tax-neo-tax"
+    rm -rf "${c:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/plugins/data/neo-tax-neo-tax"
   fi
   if [ "${1:-}" = --clean ]; then
     rm -rf "$dev"
