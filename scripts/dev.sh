@@ -2,13 +2,15 @@
 # Local dev stack: the neo-tax plugin from this working tree, installed into
 # Claude Code and reporting to the fake ingest server instead of Neo.Tax.
 #
-#   scripts/dev.sh up [--my-config] [--audit]
+#   scripts/dev.sh up [--my-config [--force]] [--audit]
 #       Build the agent, start the fake ingest server, install the plugin, and
 #       enroll. By default Claude Code runs from a throwaway config directory
 #       (.dev/claude), so your own sessions and plugins are untouched and you
 #       log in to Claude once, the first time. --my-config installs into your
 #       real ~/.claude instead, and enrolling backfills your past sessions to
-#       the fake server. --audit also starts a proxy that logs the usage the
+#       the fake server. It replaces any neo-tax install there, and `down`
+#       deletes its enrollment and queue, so it refuses an existing one
+#       unless --force. --audit also starts a proxy that logs the usage the
 #       API returns for every request, for `audit`.
 #   scripts/dev.sh claude [args...]   Run Claude Code wired to the stack.
 #   scripts/dev.sh events [-f]        Show the events the fake server accepted.
@@ -55,10 +57,11 @@ wait_http() {
 }
 
 up() {
-  my_config=0 audit=0
+  my_config=0 audit=0 force=0
   for a in "$@"; do
     case "$a" in
       --my-config) my_config=1 ;;
+      --force) force=1 ;;
       --audit) audit=1 ;;
       *) die "unknown flag $a" ;;
     esac
@@ -68,6 +71,11 @@ up() {
   echo "$port" >"$dev/port"
   echo "$audit_port" >"$dev/audit-port"
   if [ "$my_config" = 1 ]; then
+    # An empty config-dir means the install there is a previous `up`'s.
+    if [ "$force" = 0 ] && ! { [ -f "$dev/config-dir" ] && [ ! -s "$dev/config-dir" ]; } \
+      && { [ -e "$HOME/.claude/plugins/data/neo-tax-neo-tax" ] || [ -e "$HOME/.claude/plugins/marketplaces/neo-tax" ]; }; then
+      die "neo-tax is already installed in ~/.claude; --my-config would replace it and down would delete its enrollment and queued events. Pass --force to proceed."
+    fi
     : >"$dev/config-dir"
   else
     mkdir -p "$dev/claude"
@@ -191,5 +199,5 @@ case "$cmd" in
   audit) audit "$@" ;;
   status) status ;;
   down) down "$@" ;;
-  *) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

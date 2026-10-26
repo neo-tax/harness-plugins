@@ -64,7 +64,13 @@ func through(t *testing.T, up *httptest.Server) (string, []usageaudit.Record) {
 }
 
 func TestProxyRecordsStreamedUsage(t *testing.T) {
-	body, recs := through(t, upstream(t, "text/event-stream", stream))
+	for _, ct := range []string{"text/event-stream", "text/event-stream; charset=utf-8"} {
+		t.Run(ct, func(t *testing.T) { testStreamedUsage(t, ct) })
+	}
+}
+
+func testStreamedUsage(t *testing.T, contentType string) {
+	body, recs := through(t, upstream(t, contentType, stream))
 	if body != stream {
 		t.Fatalf("proxy altered the stream:\n%s", body)
 	}

@@ -49,7 +49,7 @@ scripts/dev.sh events -f   # in another terminal: each event as it arrives
 scripts/dev.sh down        # stop and uninstall; --clean also deletes .dev/
 ```
 
-Claude Code runs from a throwaway config directory under `.dev/`, so your own sessions and plugins are untouched. `up --my-config` installs into your real `~/.claude` instead, and enrolling then backfills your past sessions to the fake server.
+Claude Code runs from a throwaway config directory under `.dev/`, so your own sessions and plugins are untouched. `up --my-config` installs into your real `~/.claude` instead, and enrolling then backfills your past sessions to the fake server. It replaces any neo-tax install there: your regular `claude` sessions then report to the fake server too, and `down` deletes the enrollment and any queued events. It refuses if neo-tax is already installed unless you pass `--force`.
 
 To check token counts against the API's own, start with `up --audit`. Claude Code then talks to the API through a local proxy that logs the usage of every request (ids and counts only, never content), and `scripts/dev.sh audit` reports the requests no `session.turn` accounted for and any counts that differ.
 

@@ -97,6 +97,9 @@ func readEvents(src string) ([]json.RawMessage, error) {
 			return nil, err
 		}
 		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("%s: %s", src, resp.Status)
+		}
 		var out []json.RawMessage
 		return out, json.NewDecoder(resp.Body).Decode(&out)
 	}

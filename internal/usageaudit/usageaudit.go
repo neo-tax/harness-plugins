@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"mime"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -147,7 +148,8 @@ func NewProxy(upstream string, out io.Writer) (*Proxy, error) {
 		FlushInterval: -1,
 		ModifyResponse: func(resp *http.Response) error {
 			rec := Record{Time: time.Now().UTC(), Path: resp.Request.URL.Path, Status: resp.StatusCode, RequestID: resp.Header.Get("request-id")}
-			resp.Body = &tap{ReadCloser: resp.Body, sse: resp.Header.Get("Content-Type") == "text/event-stream", done: func(m message, u apiUsage) {
+			mt, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+			resp.Body = &tap{ReadCloser: resp.Body, sse: mt == "text/event-stream", done: func(m message, u apiUsage) {
 				rec.MessageID, rec.Model, rec.Usage = m.ID, m.Model, u.usage()
 				p.write(rec)
 			}}
