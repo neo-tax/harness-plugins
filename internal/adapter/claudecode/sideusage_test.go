@@ -238,7 +238,7 @@ func setCostStateWait(d time.Duration) func() {
 // @spec: claude-code-transcript-parser#fixture-driven
 func TestSessionEndSideUsageMatchesTheAPI(t *testing.T) {
 	h := newHookEnv(t, true)
-	h.transcript, _ = copyFixture(t, "testdata/fixtures/real-2.1.310-side-usage")
+	h.transcript, _ = copyFixture(t, "testdata/fixtures/real-side-usage-2.1.311")
 	h.run("SessionEnd", map[string]any{"reason": "prompt_input_exit"})
 	want := []any{entry("claude-opus-5-5", 4076, 2956, 0, 935, 151837)}
 	if got := h.closed()["side_usage"]; !reflect.DeepEqual(got, want) {
