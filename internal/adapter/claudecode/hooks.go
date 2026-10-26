@@ -184,9 +184,13 @@ func emit(a *agent.Agent, name string, p payload, o HookOptions) error {
 			events, commit = res.Events, res.Commit
 		}
 		if name == "SessionEnd" {
+			side, err := sideUsage(ctx, p.TranscriptPath)
+			if err != nil {
+				agent.Logf(o.DataDir, "hook=%s side usage unavailable: %s", name, errClass(err))
+			}
 			// @spec: claude-code-transcript-parser#closed-on-session-end
 			events = append(events, contract.NewClosed(ctx.envelope(lastVersion(p.TranscriptPath, store)), contract.ClosedFields{
-				EndedAt: ctx.Now.UTC(), Reason: nonEmpty(p.Reason), DroppedEvents: dropped,
+				EndedAt: ctx.Now.UTC(), Reason: nonEmpty(p.Reason), DroppedEvents: dropped, SideUsage: side,
 			}))
 			carried = dropped
 		}

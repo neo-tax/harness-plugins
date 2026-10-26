@@ -44,10 +44,14 @@ func TestAllowlistMatchesContract(t *testing.T) {
 	}
 }
 
-// checkChildren compares f's Children with the object the contract permits at
-// path, then recurses, so nesting at any depth stays in step with the schema.
+// checkChildren compares f's list flag and Children with what the contract
+// permits at path, then recurses, so nesting at any depth stays in step with
+// the schema.
 func checkChildren(t *testing.T, kind, path string, f allowlist.Field) {
 	t.Helper()
+	if list := contract.IsList(kind, path); f.List != list {
+		t.Errorf("%s.%s: allowlist list %v, schema array %v", kind, path, f.List, list)
+	}
 	want := contract.ObjectFields(kind, path)
 	if (len(f.Children) > 0) != (want != nil) {
 		t.Errorf("%s.%s: allowlist children %v, schema object fields %v", kind, path, names(f.Children), want)
@@ -128,6 +132,50 @@ func TestApplyDropsUnknownFieldsAndReportsThem(t *testing.T) {
 	}
 	if _, ok := ev["cwd"]; !ok {
 		t.Error("Apply mutated its input")
+	}
+}
+
+// @spec: field-allowlist#side-usage-included
+// @spec: field-allowlist#unknown-field-dropped-and-counted
+func TestApplyFiltersEachEntryOfAList(t *testing.T) {
+	ev := map[string]any{
+		"event_kind": "session.closed",
+		"side_usage": []any{
+			map[string]any{"model": "claude-opus-5-5", "input": 1, "title": "Acme invoice bug"},
+			"/Users/alice/acme",
+			[]any{"nested"},
+			map[string]any{"model": "claude-haiku-5-5", "output": 2, "cost_usd": map[string]any{"x": 1}},
+		},
+	}
+	out, dropped, err := allowlist.Apply(ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []any{
+		map[string]any{"model": "claude-opus-5-5", "input": 1},
+		map[string]any{"model": "claude-haiku-5-5", "output": 2},
+	}
+	if !reflect.DeepEqual(out["side_usage"], want) {
+		t.Errorf("side_usage %v", out["side_usage"])
+	}
+	sort.Strings(dropped)
+	if !reflect.DeepEqual(dropped, []string{"side_usage[]", "side_usage[]", "side_usage[].cost_usd", "side_usage[].title"}) {
+		t.Errorf("dropped %v", dropped)
+	}
+}
+
+// A list-valued field holds only lists: an object or a scalar in its place is
+// dropped, and a null passes through.
+func TestApplyListFieldShape(t *testing.T) {
+	for _, v := range []any{map[string]any{"model": "x"}, "x"} {
+		out, dropped, _ := allowlist.Apply(map[string]any{"event_kind": "session.closed", "side_usage": v})
+		if _, ok := out["side_usage"]; ok || !reflect.DeepEqual(dropped, []string{"side_usage"}) {
+			t.Errorf("%v: out %v dropped %v", v, out, dropped)
+		}
+	}
+	out, dropped, _ := allowlist.Apply(map[string]any{"event_kind": "session.closed", "side_usage": nil})
+	if v, ok := out["side_usage"]; !ok || v != nil || len(dropped) != 0 {
+		t.Errorf("null: out %v dropped %v", out, dropped)
 	}
 }
 

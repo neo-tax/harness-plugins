@@ -12,7 +12,7 @@ import (
 
 // Anonymizer turns a real Claude Code transcript into a fixture. It keeps an
 // explicit set of fields (ids, usage blocks, timestamps, versions, branches,
-// and pull-request link numbers) and replaces every other value with a
+// pull-request link numbers, and session totals) and replaces every other value with a
 // placeholder, so a field it has never seen is replaced by default.
 // Repository names become consistent placeholders.
 //
@@ -33,8 +33,12 @@ var keepTop = map[string]bool{
 	"type": true, "uuid": true, "parentUuid": true, "logicalParentUuid": true, "leafUuid": true,
 	"sessionId": true, "timestamp": true, "version": true, "gitBranch": true, "requestId": true,
 	"isSidechain": true, "agentId": true, "entrypoint": true, "userType": true, "isMeta": true,
-	"prNumber": true, "subtype": true,
+	"prNumber": true, "subtype": true, "startTime": true,
 }
+
+// modelName is the shape of a model name; a modelUsage key of any other
+// shape is dropped.
+var modelName = regexp.MustCompile(`^[a-z0-9][a-z0-9.\-]*(\[[a-z0-9]+\])?$`)
 
 // keepMessage are message fields kept as they are. usage is numbers and tier
 // names only.
@@ -62,6 +66,8 @@ func (a *Anonymizer) Anonymize(r io.Reader, w io.Writer) error {
 				out[k] = scrub(v)
 			case k == "message":
 				out[k] = a.message(v)
+			case k == "modelUsage":
+				out[k] = modelUsage(v)
 			case k == "cwd":
 				out[k] = "/anonymized/cwd"
 			case k == "prRepository":
@@ -101,6 +107,30 @@ func (a *Anonymizer) message(raw json.RawMessage) any {
 		} else {
 			out[k] = redacted
 		}
+	}
+	return out
+}
+
+// modelUsage keeps a cost-state line's per-model numbers: model-name keys,
+// and within each, numeric values only.
+func modelUsage(raw json.RawMessage) any {
+	var m map[string]map[string]json.RawMessage
+	if json.Unmarshal(raw, &m) != nil {
+		return redacted
+	}
+	out := map[string]map[string]json.Number{}
+	for model, counts := range m {
+		if !modelName.MatchString(model) {
+			continue
+		}
+		kept := map[string]json.Number{}
+		for k, v := range counts {
+			var n json.Number
+			if json.Unmarshal(v, &n) == nil {
+				kept[k] = n
+			}
+		}
+		out[model] = kept
 	}
 	return out
 }

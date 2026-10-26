@@ -36,6 +36,10 @@ func typedEvents() []any {
 		}}),
 		contract.NewPROpened(testEnvelope, contract.PROpenedFields{Repo: r, Number: 7, Timestamp: ts}),
 		contract.NewClosed(testEnvelope, contract.ClosedFields{EndedAt: ts, Reason: ptr("other"), DroppedEvents: 3}),
+		contract.NewClosed(testEnvelope, contract.ClosedFields{EndedAt: ts, Reason: ptr("other"), SideUsage: []contract.SideUsage{
+			{Model: "claude-opus-5-5", Input: 1169, Output: 14},
+			{Model: "claude-haiku-5-5", CacheRead: 10, CacheWrite5m: 2, CacheWrite1h: 3},
+		}}),
 	}
 }
 

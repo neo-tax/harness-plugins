@@ -4,14 +4,15 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-10-24
-updated: 2026-10-25
-version: 3
+updated: 2026-10-26
+version: 4
 affects:
   - contract/*.schema.json
   - contract/*.go
   - internal/fakeingest/*.go
   - cmd/fake-ingest/*.go
   - internal/adapter/claudecode/transcript.go
+  - internal/adapter/claudecode/sideusage.go
 ---
 
 # Session event wire contract
@@ -32,10 +33,12 @@ Governs every request and response exchanged between the agent and Neo.Tax: the 
 - `turn-fields`(tested): A `session.turn` event carries `message_id`, `request_id`, `subagent_id`, `timestamp`, `model`, `branch`, `head_sha`, and `usage`.
 - `usage-shape`(tested): `usage` carries `input`, `output`, `cache_write_5m`, `cache_write_1h`, `cache_read`, `service_tier`, and `source`, where `source` is one of `payload`, `transcript`, or `unknown`, and every count is null when `source` is `unknown`.
 - `pr-opened-fields`(tested): A `session.pr_opened` event carries `repo`, `number`, and `timestamp`.
-- `closed-fields`(tested): A `session.closed` event carries `ended_at`, `reason`, and `dropped_events`.
+- `closed-fields`(tested): A `session.closed` event carries `ended_at`, `reason`, `dropped_events`, and `side_usage`.
+- `side-usage-shape`(tested): `side_usage` is null when the harness recorded no session totals, else an array with at most one entry per model, each carrying `model` and the non-negative integer counts `input`, `output`, `cache_write_5m`, `cache_write_1h`, and `cache_read`.
+- `side-usage-cumulative`(approved): `side_usage` covers the whole session up to that close, so the server takes it from the session's `session.closed` with the latest `ended_at` and never adds two closes' `side_usage` together.
 - `repo-shape`(tested): `repo` is either null or an object of `host`, `owner`, and `name`, each lowercase.
 - `subagent-turns-belong-to-parent`(tested): A turn produced by a subagent carries the parent session's `session_id` and a non-null `subagent_id`; a main-thread turn carries a null `subagent_id`.
-- `idempotency-key`(approved): The server treats two events with the same `device_id`, `session_id`, `event_kind`, and `message_id` as the same event; for `session.pr_opened` the key adds `repo` and `number`; for the other kinds without a `message_id`, the key uses the event kind alone within the session.
+- `idempotency-key`(approved): The server treats two events with the same `device_id`, `session_id`, `event_kind`, and `message_id` as the same event; for `session.pr_opened` the key adds `repo` and `number`; for `session.closed` it adds `ended_at`, so a resumed session's later close is kept; for `session.opened`, without a `message_id`, the key uses the event kind alone within the session.
 - `batched-ingest`(tested): An ingest request carries an ordered array of between 1 and 500 session events.
 - `ingest-response-per-event`(tested): An ingest response reports, for the batch as a whole, how many events were accepted, how many were duplicates, and the index and reason of each event rejected for schema reasons.
 - `schema-rejection-is-partial`(approved): A schema-invalid event in a batch does not cause the server to reject the valid events in the same batch.
@@ -55,6 +58,8 @@ The contract carries one event per assistant message rather than a cumulative pe
 `session.pr_opened` is included from the first version because Claude Code records pull requests opened from a session; it is the strongest session-to-PR signal available and costs nothing to carry. A harness that cannot give per-message usage still emits `session.turn` events with `usage.source` as `unknown`, so the shape is uniform across adapters.
 
 `dropped_events` is on both `session.opened` and `session.closed` so that a count left by the queue cap rides on whichever of the two the agent emits next; a session killed before `SessionEnd` still reports it through the next session's `session.opened`.
+
+`side_usage` is the usage of the API calls a harness makes that never become an assistant message in its transcript, so no `session.turn` carries them: in Claude Code, the session title, the recap shown after the engineer has been away, and the summarization behind compaction. A usage audit against the API's own counts found these were 14% of a sample of real sessions' tokens, so leaving them out would understate spend. They have no message id or request id to key a turn by, and the harness only records them as session totals, so they ride on `session.closed` as one entry per model rather than as turns. The array form, not an object keyed by model, keeps model names out of field names, where the allowlist could not describe them. Because the totals are cumulative and a resumed session closes more than once, each close carries the session's whole side usage so far; the latest close supersedes the earlier ones, and a lost close costs only the side usage since the one before it. `side_usage` was added before any release published the contract, so it is part of `contract_version` 1 rather than a new version.
 
 `email_confirmed_by` is in the enrollment request from the first version even though v0.1 only ever sends `engineer`, so managed enrollment in v1.0 adds no server-side change.
 
