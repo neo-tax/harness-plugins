@@ -141,7 +141,7 @@ func login(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		Harness: claudecode.Harness, AgentVersion: Version,
 		AccountEmail: claudecode.AccountEmail,
 		Interactive:  interactive, In: stdin, Out: stdout, ReadSecret: readSecret,
-		Browser: !interactive, OpenURL: browserOpener(), TerminalCommand: terminalCommand(d),
+		Browser: !interactive, OpenURL: browserOpener(), TerminalCommand: terminalCommand(d, *server),
 		HTTP: &http.Client{Timeout: 30 * time.Second},
 	})
 	switch {
@@ -176,13 +176,18 @@ func browserOpener() func(string) error {
 }
 
 // terminalCommand is this login command as an engineer would type it in a
-// terminal: this binary, with the data directory the harness would use.
-func terminalCommand(dataDir string) string {
+// terminal: this binary, with the data directory the harness would use and
+// the server this login was pointed at, which their shell may not set.
+func terminalCommand(dataDir, server string) string {
 	self, err := os.Executable()
 	if err != nil {
 		self = "neo-tax-agent"
 	}
-	return shellQuote(self) + " login --data-dir " + shellQuote(dataDir)
+	c := shellQuote(self) + " login --data-dir " + shellQuote(dataDir)
+	if server != "" && server != enroll.DefaultServer {
+		c += " --server " + shellQuote(server)
+	}
+	return c
 }
 
 func shellQuote(s string) string {

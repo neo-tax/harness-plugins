@@ -24,7 +24,9 @@ const BrowserWait = 5 * time.Minute
 // ErrLoginNotCompleted means the browser form was not submitted in time.
 var ErrLoginNotCompleted = errors.New("login was not completed in the browser")
 
-// OpenBrowser opens url in the engineer's default browser.
+// OpenBrowser opens url in the engineer's default browser without waiting
+// for it: some launchers (xdg-open with $BROWSER set) run the browser in the
+// foreground until it exits.
 func OpenBrowser(url string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
@@ -35,7 +37,11 @@ func OpenBrowser(url string) error {
 	default:
 		cmd = exec.Command("xdg-open", url)
 	}
-	return cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go cmd.Wait()
+	return nil
 }
 
 // browserLogin serves a one-page form on the loopback interface, at a path
@@ -152,6 +158,15 @@ func browserLogin(ctx context.Context, o Options, candidates []string, email str
 		return nil
 	case <-timer.C:
 	case <-ctx.Done():
+	}
+	// Close the form under the lock, so a submit already enrolling finishes
+	// first and is reported as the success it was.
+	mu.Lock()
+	finished := done
+	done = true
+	mu.Unlock()
+	if finished {
+		return nil
 	}
 	fmt.Fprintln(o.Out, "Login was not completed; run neo-tax:login again when ready.")
 	return ErrLoginNotCompleted

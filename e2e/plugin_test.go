@@ -84,8 +84,9 @@ func TestSkillsDelegateToAgent(t *testing.T) {
 	}
 }
 
-// The login command can wait five minutes for the browser form, longer than
-// a Bash call's default timeout, and the model must never relay the token.
+// The login command waits up to five minutes for the browser form, and the
+// model can relay the form's address only while it runs, so the skill runs
+// it in the background; the model must never relay the token.
 // @spec: device-enrollment#token-never-in-conversation
 // @spec: device-enrollment#browser-wait-bounded
 func TestLoginSkillWaitsForTheFormAndNeverAsksForTheToken(t *testing.T) {
@@ -94,7 +95,7 @@ func TestLoginSkillWaitsForTheFormAndNeverAsksForTheToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(b)
-	for _, want := range []string{"timeout of 600000", "Never ask the engineer for the enrollment token"} {
+	for _, want := range []string{"run_in_background", "Never ask the engineer for the enrollment token"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("login skill lacks %q", want)
 		}

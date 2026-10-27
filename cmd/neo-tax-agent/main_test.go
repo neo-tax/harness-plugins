@@ -63,8 +63,8 @@ func TestLoginWithoutTerminalUsesTheBrowserForm(t *testing.T) {
 	if code := run([]string{"login", "--data-dir", dir, "--server", srv.URL}, strings.NewReader(""), &out, &errOut); code != 0 {
 		t.Fatalf("exit %d: %s%s", code, out.String(), errOut.String())
 	}
-	if !strings.Contains(out.String(), " login --data-dir ") {
-		t.Errorf("no terminal command:\n%s", out.String())
+	if !strings.Contains(out.String(), " login --data-dir ") || !strings.Contains(out.String(), " --server "+srv.URL) {
+		t.Errorf("no terminal command for this server:\n%s", out.String())
 	}
 	if d, err := enroll.Load(dir); err != nil || d.Email != "e@example.com" {
 		t.Fatalf("%+v %v", d, err)
