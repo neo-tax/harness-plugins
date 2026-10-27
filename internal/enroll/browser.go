@@ -3,6 +3,7 @@ package enroll
 import (
 	"context"
 	"crypto/rand"
+	_ "embed"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -15,7 +16,17 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
+
+// interFont is Inter's Latin subset (weights 400 to 500), the typeface of
+// Neo.Tax's site, served from the form's own address so the page loads
+// nothing from elsewhere. Licensed under the SIL Open Font License 1.1;
+// see fonts/OFL.txt.
+//
+//go:embed fonts/inter-latin-400-500.woff2
+var interFont []byte
 
 // BrowserWait bounds how long login waits for the browser form.
 //
@@ -96,6 +107,14 @@ func browserLogin(ctx context.Context, o Options, candidates []string, token, em
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
+		if r.URL.Path == path+"/inter.woff2" && r.Method == http.MethodGet {
+			// Cached, so the result page, rendered after the form has
+			// stopped serving, still has the font the form loaded.
+			w.Header().Set("Content-Type", "font/woff2")
+			w.Header().Set("Cache-Control", "private, max-age=3600, immutable")
+			w.Write(interFont)
+			return
+		}
 		if r.URL.Path != path {
 			http.NotFound(w, r)
 			return
@@ -104,9 +123,9 @@ func browserLogin(ctx context.Context, o Options, candidates []string, token, em
 		h.Set("Cache-Control", "no-store")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("X-Frame-Options", "DENY")
-		h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'")
+		h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; form-action 'self'; frame-ancestors 'none'")
 		mu.Lock()
-		page := formPage{Candidates: candidates, Email: email, HasToken: token != ""}
+		page := formPage{Candidates: candidates, Email: email, HasToken: token != "", Font: path + "/inter.woff2"}
 		mu.Unlock()
 		switch r.Method {
 		case http.MethodGet:
@@ -143,7 +162,7 @@ func browserLogin(ctx context.Context, o Options, candidates []string, token, em
 				if errors.Is(err, ErrTokenRejected) {
 					token = ""
 				}
-				page.Error, page.Email, page.Expired, page.HasToken = err.Error(), chosen, expired.Load(), token != ""
+				page.Error, page.Email, page.Expired, page.HasToken = sentence(err.Error()), chosen, expired.Load(), token != ""
 				page.render(w)
 				return
 			}
@@ -206,6 +225,17 @@ func minutes(d time.Duration) string {
 	return d.String()
 }
 
+// sentence makes an error message read as a sentence on the page: an
+// initial capital and a closing period.
+func sentence(msg string) string {
+	r, n := utf8.DecodeRuneInString(msg)
+	msg = string(unicode.ToUpper(r)) + msg[n:]
+	if !strings.HasSuffix(msg, ".") {
+		msg += "."
+	}
+	return msg
+}
+
 type formPage struct {
 	Candidates []string
 	Email      string
@@ -213,6 +243,7 @@ type formPage struct {
 	Done       bool
 	Expired    bool
 	HasToken   bool
+	Font       string
 }
 
 func (p formPage) render(w http.ResponseWriter) {
@@ -243,25 +274,45 @@ var formTemplate = template.Must(template.New("form").Parse(`<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Neo.Tax login</title>
 <style>
-:root { color-scheme: light dark; --fg: #1a1a1a; --muted: #5c5c5c; --bg: #fafafa; --card: #fff; --line: #d9d9d9; --accent: #0b6e4f; --err: #a4262c; }
-@media (prefers-color-scheme: dark) { :root { --fg: #ececec; --muted: #a3a3a3; --bg: #161616; --card: #1f1f1f; --line: #3a3a3a; --accent: #4cc39a; --err: #ff8a8a; } }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 400 500; font-display: swap; src: url("{{.Font}}") format("woff2"); }
+:root {
+  color-scheme: light dark;
+  /* Neo.Tax's site palette: ink and body text on paper, navy actions. */
+  --page: #f4f6f8; --card: #fff; --ink: #111827; --body: #4b5563; --muted: #5f687c; --line: #d9dee3;
+  --action: #194a80; --action-hover: #0f2e52; --action-text: #fff; --focus: #5b84b8; --err: #b42318;
+}
+@media (prefers-color-scheme: dark) {
+  /* The site's night sections: navy surfaces, white actions with navy text. */
+  :root {
+    --page: #07172a; --card: #0c233e; --ink: #fff; --body: #b8cce4; --muted: #8aaad1; --line: #143e6c;
+    --action: #fff; --action-hover: #dce7f3; --action-text: #0f2e52; --focus: #8aaad1; --err: #ffa2a2;
+  }
+}
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-main { max-width: 28rem; margin: 10vh auto; padding: 0 16px; }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
-h1 { font-size: 1.25rem; margin: 0 0 4px; }
-p { margin: 0 0 16px; color: var(--muted); }
-label { display: block; font-weight: 600; margin: 16px 0 6px; }
-fieldset { border: 0; padding: 0; margin: 0; }
-legend { font-weight: 600; margin: 16px 0 6px; padding: 0; }
-.choice { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-weight: 400; }
-input[type=password], input[type=email] { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit; font: inherit; }
-button { margin-top: 20px; width: 100%; padding: 10px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
-.err { color: var(--err); margin: 12px 0 0; }
+body { margin: 0; background: var(--page); color: var(--body); font: 15px/1.55 "Inter", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+main { max-width: 27rem; margin: 10vh auto; padding: 0 16px; }
+.brand { color: var(--ink); font-weight: 500; font-size: 14px; letter-spacing: -0.01em; margin: 0 0 12px 2px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 28px; }
+h1 { color: var(--ink); font-size: 24px; line-height: 1.2; font-weight: 500; letter-spacing: -0.035em; margin: 0 0 8px; }
+p { margin: 0; }
+form { margin-top: 24px; }
+.field { margin-top: 20px; }
+.field:first-child { margin-top: 0; }
+label.title, legend { display: block; color: var(--ink); font-weight: 500; font-size: 14px; margin: 0 0 8px; padding: 0; }
+fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.choice { display: flex; align-items: center; gap: 10px; margin: 0 0 6px; color: var(--ink); cursor: pointer; }
+input[type=radio] { margin: 0; accent-color: var(--action); width: 16px; height: 16px; }
+input[type=password], input[type=email] { width: 100%; height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: var(--ink); font: inherit; }
+.choice + input[type=email] { margin-top: 4px; }
+input::placeholder { color: var(--muted); }
+input:focus-visible, button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+button { margin-top: 24px; width: 100%; height: 44px; border: 0; border-radius: 4px; background: var(--action); color: var(--action-text); font: inherit; font-weight: 500; letter-spacing: -0.01em; cursor: pointer; transition: background-color .15s; }
+button:hover { background: var(--action-hover); }
+.err { color: var(--err); margin-top: 16px; }
 </style>
 </head>
 <body>
-<main><div class="card">
+<main><p class="brand">Neo.Tax</p><div class="card">
 {{if .Expired}}
 <h1>Login expired</h1>
 {{if .Error}}<p class="err" role="alert">{{.Error}}</p>{{end}}
@@ -270,18 +321,18 @@ button { margin-top: 20px; width: 100%; padding: 10px; border: 0; border-radius:
 <h1>Enrolled</h1>
 <p>This device is enrolled with Neo.Tax as {{.Email}}. You can close this tab and return to Claude Code.</p>
 {{else}}
-<h1>Enroll with Neo.Tax</h1>
+<h1>Enroll this device</h1>
 {{if .HasToken}}<p>Confirm the work email Neo.Tax should know you by.</p>{{else}}<p>Paste the enrollment token your Neo.Tax admin shared. It goes from this page to the agent on your machine, and never into your Claude Code conversation.</p>{{end}}
 <form method="post">
-{{if not .HasToken}}<label for="token">Enrollment token</label>
-<input id="token" name="token" type="password" autocomplete="off" required autofocus>{{end}}
-{{if .Candidates}}<fieldset>
+{{if not .HasToken}}<div class="field"><label class="title" for="token">Enrollment token</label>
+<input id="token" name="token" type="password" autocomplete="off" required autofocus></div>{{end}}
+<div class="field">{{if .Candidates}}<fieldset>
 <legend>Your work email</legend>
 {{range .Candidates}}<label class="choice"><input type="radio" name="email" value="{{.}}"{{if $.IsCandidate .}} checked{{end}}> {{.}}</label>
 {{end}}<label class="choice"><input type="radio" name="email" value="other"{{if .Other}} checked{{end}}> Another email</label>
 <input name="email_other" type="email" aria-label="Another email" placeholder="you@company.com"{{if .Other}} value="{{.Email}}"{{end}}>
-</fieldset>{{else}}<label for="email_other">Your work email</label>
-<input id="email_other" name="email_other" type="email" required placeholder="you@company.com" value="{{.Email}}">{{end}}
+</fieldset>{{else}}<label class="title" for="email_other">Your work email</label>
+<input id="email_other" name="email_other" type="email" required placeholder="you@company.com" value="{{.Email}}">{{end}}</div>
 {{if .Error}}<p class="err" role="alert">{{.Error}}</p>{{end}}
 <button type="submit">Enroll this device</button>
 </form>

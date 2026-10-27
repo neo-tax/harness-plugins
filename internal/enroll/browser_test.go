@@ -433,3 +433,47 @@ func TestBrowserFormAddressPrintedFirst(t *testing.T) {
 		t.Errorf("form took %s to load while the browser opened", loaded)
 	}
 }
+
+// The form's font is served from the form's own secret address, so the page
+// loads nothing from elsewhere.
+// @spec: device-enrollment#browser-form-loopback
+func TestBrowserFormServesItsFont(t *testing.T) {
+	f := newFixture(t)
+	u, done := f.browserLogin(t, time.Minute, nil)
+	_, page := get(t, u)
+	if strings.Contains(page, "https://") {
+		t.Errorf("page loads from elsewhere:\n%s", page)
+	}
+	resp, err := http.Get(u + "/inter.woff2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	// Cacheable: the result page renders after the form stops serving.
+	if !strings.Contains(resp.Header.Get("Cache-Control"), "max-age") {
+		t.Errorf("font not cacheable: %q", resp.Header.Get("Cache-Control"))
+	}
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "font/woff2" || !strings.HasPrefix(string(b), "wOF2") {
+		t.Errorf("font: %d %s %d bytes", resp.StatusCode, resp.Header.Get("Content-Type"), len(b))
+	}
+	parsed, _ := url.Parse(u)
+	if code, _ := get(t, parsed.Scheme+"://"+parsed.Host+"/inter.woff2"); code != http.StatusNotFound {
+		t.Errorf("font outside the secret path: %d", code)
+	}
+	submit(t, u, url.Values{"token": {"et_good"}, "email": {"account@example.com"}})
+	wait(t, done)
+}
+
+// Errors read as sentences in the form.
+// @spec: device-enrollment#browser-form-retries
+func TestBrowserFormErrorsAreSentences(t *testing.T) {
+	f := newFixture(t)
+	u, done := f.browserLogin(t, time.Minute, nil)
+	_, page := submit(t, u, url.Values{"token": {"et_expired"}, "email": {"account@example.com"}})
+	if !strings.Contains(page, "The enrollment token was rejected;") || !strings.Contains(page, "for a new one.<") {
+		t.Errorf("error not a sentence:\n%s", page)
+	}
+	submit(t, u, url.Values{"token": {"et_good"}, "email": {"account@example.com"}})
+	wait(t, done)
+}
