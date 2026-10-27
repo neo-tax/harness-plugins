@@ -367,3 +367,27 @@ func TestBrowserFormUsesAGivenToken(t *testing.T) {
 		t.Fatalf("token %q", f.last.EnrollmentToken)
 	}
 }
+
+// A given token the server rejects is dropped, and the form asks for one.
+// @spec: device-enrollment#browser-form-retries
+func TestBrowserFormAsksForATokenWhenTheGivenOneIsRejected(t *testing.T) {
+	f := newFixture(t)
+	o := f.opts("et_expired", "")
+	o.Browser, o.Wait = true, time.Minute
+	addr := make(chan string, 1)
+	o.OpenURL = func(u string) error { addr <- u; return nil }
+	done := make(chan error, 1)
+	go func() { done <- enroll.Login(context.Background(), o) }()
+	u := <-addr
+	_, page := submit(t, u, url.Values{"email": {"account@example.com"}})
+	if !strings.Contains(page, "rejected") || !strings.Contains(page, `type="password"`) {
+		t.Fatalf("rejected given token: no way to enter another:\n%s", page)
+	}
+	submit(t, u, url.Values{"token": {"et_good"}, "email": {"account@example.com"}})
+	if err := wait(t, done); err != nil {
+		t.Fatal(err)
+	}
+	if f.last.EnrollmentToken != "et_good" {
+		t.Fatalf("token %q", f.last.EnrollmentToken)
+	}
+}

@@ -38,6 +38,8 @@ var (
 	// collect it neither on a terminal nor in a browser form; the command
 	// to run in a terminal was written to Out.
 	ErrNeedInput = errors.New("enrollment needs an enrollment token and an email")
+	// ErrTokenRejected means the server refused the enrollment token.
+	ErrTokenRejected = errors.New("the enrollment token was rejected; it may have expired or been revoked. Ask your Neo.Tax admin for a new one")
 )
 
 // Device is what a device holds after enrollment.
@@ -208,7 +210,7 @@ func exchange(ctx context.Context, o Options, token, email string) error {
 	})
 	var se *ingest.StatusError
 	if errors.As(err, &se) && se.Code == http.StatusUnauthorized {
-		return errors.New("the enrollment token was rejected; it may have expired or been revoked. Ask your Neo.Tax admin for a new one")
+		return ErrTokenRejected
 	}
 	if err != nil {
 		return fmt.Errorf("enrollment failed: %w", err)

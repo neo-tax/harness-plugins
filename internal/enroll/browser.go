@@ -113,7 +113,9 @@ func browserLogin(ctx context.Context, o Options, candidates []string, token, em
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'")
+		mu.Lock()
 		page := formPage{Candidates: candidates, Email: email, HasToken: token != ""}
+		mu.Unlock()
 		switch r.Method {
 		case http.MethodGet:
 			page.render(w)
@@ -122,10 +124,6 @@ func browserLogin(ctx context.Context, o Options, candidates []string, token, em
 			if err := r.ParseForm(); err != nil {
 				http.Error(w, "bad request", http.StatusBadRequest)
 				return
-			}
-			submitted := token
-			if submitted == "" {
-				submitted = strings.TrimSpace(r.PostFormValue("token"))
 			}
 			// The page runs no script, so typing another email does not
 			// select its radio button: a typed email wins over the
@@ -137,13 +135,23 @@ func browserLogin(ctx context.Context, o Options, candidates []string, token, em
 			chosen = strings.TrimSpace(chosen)
 			mu.Lock()
 			defer mu.Unlock()
+			page.HasToken = token != ""
+			submitted := token
+			if submitted == "" {
+				submitted = strings.TrimSpace(r.PostFormValue("token"))
+			}
 			if closed {
 				page.Done, page.Expired, page.Email = as != "", as == "", as
 				page.render(w)
 				return
 			}
 			if err := exchange(r.Context(), o, submitted, chosen); err != nil {
-				page.Error, page.Email, page.Expired = err.Error(), chosen, expired.Load()
+				// A given token that is refused is dropped, so the form
+				// asks for another.
+				if errors.Is(err, ErrTokenRejected) {
+					token = ""
+				}
+				page.Error, page.Email, page.Expired, page.HasToken = err.Error(), chosen, expired.Load(), token != ""
 				page.render(w)
 				return
 			}
