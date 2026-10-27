@@ -400,8 +400,14 @@ func TestBrowserFormAddressPrintedFirst(t *testing.T) {
 	f := newFixture(t)
 	var loaded time.Duration
 	u, done := f.browserLogin(t, time.Minute, func(u string) error {
+		// This runs on Login's goroutine, so it reports errors rather than
+		// failing the test from here.
 		start := time.Now()
-		get(t, u)
+		resp, err := http.Get(u)
+		if err != nil {
+			return err
+		}
+		resp.Body.Close()
 		loaded = time.Since(start)
 		submitAsync(u, url.Values{"token": {"et_good"}, "email": {"account@example.com"}})
 		time.Sleep(300 * time.Millisecond)
