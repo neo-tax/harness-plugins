@@ -34,8 +34,9 @@ const DefaultServer = "https://app.neo.tax"
 var (
 	// ErrNotEnrolled means no device key is stored.
 	ErrNotEnrolled = errors.New("this device is not enrolled; run neo-tax:login")
-	// ErrNeedInput means the token or email is missing and there is no
-	// terminal to prompt on; the instructions were written to Out.
+	// ErrNeedInput means the token or email is missing and the agent could
+	// collect it neither on a terminal nor in a browser form; the command
+	// to run in a terminal was written to Out.
 	ErrNeedInput = errors.New("enrollment needs an enrollment token and an email")
 )
 
@@ -116,25 +117,42 @@ type Options struct {
 	In          io.Reader
 	// ReadSecret, when set, reads the token without echoing it.
 	ReadSecret func() (string, error)
-	Out        io.Writer
-	HTTP       *http.Client
+	// Browser, when not Interactive, collects missing input in a form served
+	// on the loopback interface, opened with OpenURL, for at most Wait
+	// (BrowserWait when zero).
+	Browser bool
+	OpenURL func(url string) error
+	Wait    time.Duration
+	// TerminalCommand is the login command an engineer can run in a
+	// terminal instead; it is named whenever input is collected elsewhere.
+	TerminalCommand string
+	Out             io.Writer
+	HTTP            *http.Client
 }
 
-// Login enrolls this device. Missing input is prompted for on a terminal;
-// otherwise Login writes what it needs and returns ErrNeedInput.
+// Login enrolls this device. Missing input is prompted for on a terminal,
+// or collected in a browser form; the token is never written to Out, and
+// with neither, Login names the terminal command and returns ErrNeedInput.
 //
 // @spec: device-enrollment#interactive-enrollment
 // @spec: device-enrollment#enrollment-is-the-only-way-to-get-a-key
+// @spec: device-enrollment#token-never-in-conversation
 func Login(ctx context.Context, o Options) error {
 	if o.Out == nil {
 		o.Out = io.Discard
+	}
+	if o.TerminalCommand == "" {
+		o.TerminalCommand = "neo-tax-agent login"
 	}
 	token, email := strings.TrimSpace(o.Token), strings.TrimSpace(o.Email)
 
 	if token == "" || email == "" {
 		candidates := emailCandidates(ctx, o.AccountEmail)
 		if !o.Interactive {
-			writeInstructions(o.Out, token == "", email == "", candidates)
+			if o.Browser {
+				return browserLogin(ctx, o, candidates, email)
+			}
+			fmt.Fprintf(o.Out, "Enrolling needs your Neo.Tax enrollment token, which should not go through this conversation. Run this in a terminal:\n  %s\n", o.TerminalCommand)
 			return ErrNeedInput
 		}
 		in := bufio.NewReader(o.In)
@@ -155,6 +173,12 @@ func Login(ctx context.Context, o Options) error {
 			email = promptEmail(o.Out, in, candidates)
 		}
 	}
+	return exchange(ctx, o, token, email)
+}
+
+// exchange checks the input, enrolls with the server, and stores the key.
+// Its errors are written for the engineer and never carry the token.
+func exchange(ctx context.Context, o Options, token, email string) error {
 	if token == "" {
 		return errors.New("no enrollment token given")
 	}
@@ -230,23 +254,6 @@ func emailCandidates(ctx context.Context, account func() string) []string {
 		add(account())
 	}
 	return out
-}
-
-func writeInstructions(w io.Writer, needToken, needEmail bool, candidates []string) {
-	fmt.Fprintln(w, "Enrollment needs input. Ask the engineer for:")
-	if needToken {
-		fmt.Fprintln(w, "  - the enrollment token their Neo.Tax admin shared (pass it as --token)")
-	}
-	if needEmail {
-		fmt.Fprintln(w, "  - their work email, confirmed by them (pass it as --email)")
-		if len(candidates) > 0 {
-			fmt.Fprintln(w, "    Emails found on this machine to offer:")
-			for _, c := range candidates {
-				fmt.Fprintf(w, "      %s\n", c)
-			}
-		}
-	}
-	fmt.Fprintln(w, "Then run this command again with --token and --email.")
 }
 
 func promptEmail(out io.Writer, in *bufio.Reader, candidates []string) string {

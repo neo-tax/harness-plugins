@@ -180,18 +180,24 @@ func TestInvalidEmailRejectedBeforeRequest(t *testing.T) {
 
 // Without a terminal the agent cannot prompt, so it says exactly what it
 // needs and which emails it found, and stores nothing.
-// @spec: device-enrollment#interactive-enrollment
-// @spec: device-enrollment#email-candidates
-func TestMissingInputListsWhatIsNeeded(t *testing.T) {
+// With neither a terminal nor the browser form, the agent never asks the
+// model for the token: it names the command to run in a terminal.
+// @spec: device-enrollment#token-never-in-conversation
+func TestMissingInputPointsToTheTerminal(t *testing.T) {
 	f := newFixture(t)
-	err := enroll.Login(context.Background(), f.opts("", ""))
+	o := f.opts("", "")
+	o.TerminalCommand = "/path/to/neo-tax-agent login"
+	err := enroll.Login(context.Background(), o)
 	if !errors.Is(err, enroll.ErrNeedInput) {
 		t.Fatalf("err %v", err)
 	}
 	out := f.out.String()
-	for _, want := range []string{"enrollment token", "--token", "--email", "Engineer@Example.com", "account@example.com"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output lacks %q:\n%s", want, out)
+	if !strings.Contains(out, "/path/to/neo-tax-agent login") {
+		t.Errorf("output lacks the terminal command:\n%s", out)
+	}
+	for _, never := range []string{"--token", "Ask the engineer", "paste"} {
+		if strings.Contains(out, never) {
+			t.Errorf("output asks for the token through the conversation (%q):\n%s", never, out)
 		}
 	}
 	if f.last.EnrollmentToken != "" {
@@ -203,6 +209,8 @@ func TestMissingInputListsWhatIsNeeded(t *testing.T) {
 func TestCandidatesDedupedAndAccountOptional(t *testing.T) {
 	f := newFixture(t)
 	o := f.opts("", "")
+	o.Interactive = true
+	o.In = strings.NewReader("\n\n")
 	o.AccountEmail = func() string { return "ENGINEER@example.com" }
 	enroll.Login(context.Background(), o)
 	if n := strings.Count(strings.ToLower(f.out.String()), "engineer@example.com"); n != 1 {
@@ -210,6 +218,7 @@ func TestCandidatesDedupedAndAccountOptional(t *testing.T) {
 	}
 	f.out.Reset()
 	o.AccountEmail = nil
+	o.In = strings.NewReader("\n\n")
 	enroll.Login(context.Background(), o)
 	if strings.Contains(f.out.String(), "account@") {
 		t.Error("account email without a source")

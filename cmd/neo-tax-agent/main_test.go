@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -19,11 +21,8 @@ func TestLoginCommand(t *testing.T) {
 	defer srv.Close()
 	dir := t.TempDir()
 	var out, errOut bytes.Buffer
-	if code := run([]string{"login", "--data-dir", dir, "--server", srv.URL}, strings.NewReader(""), &out, &errOut); code != 3 {
-		t.Fatalf("missing input: exit %d", code)
-	}
-	if !strings.Contains(out.String(), "--token") {
-		t.Fatalf("no instructions: %s", out.String())
+	if code := run([]string{"login", "--data-dir", dir, "--server", srv.URL, "--token", "t", "--email", "e@example.com"}, strings.NewReader(""), &out, &errOut); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
 	}
 	out.Reset()
 	if code := run([]string{"login", "--data-dir", dir, "--server", srv.URL, "--token", "t", "--email", "e@example.com"}, strings.NewReader(""), &out, &errOut); code != 0 {
@@ -38,6 +37,37 @@ func TestLoginCommand(t *testing.T) {
 	// @spec: event-queue-and-backfill#backfill-command
 	if code := run([]string{"backfill", "--data-dir", dir, "--background", "--restart"}, nil, &out, &errOut); code != 0 || !restarted {
 		t.Fatalf("backfill --restart: exit %d, restart %v: %s", code, restarted, errOut.String())
+	}
+}
+
+// Run by a harness, with no terminal, login collects the token in the
+// browser form and names the terminal command as the alternative.
+// @spec: device-enrollment#interactive-enrollment
+// @spec: device-enrollment#browser-terminal-alternative
+func TestLoginWithoutTerminalUsesTheBrowserForm(t *testing.T) {
+	startBackfill = func(string, bool) error { return nil }
+	srv := httptest.NewServer(fakeingest.New(fakeingest.Options{}))
+	defer srv.Close()
+	dir := t.TempDir()
+	opened := make(chan string, 1)
+	openURL = func(u string) error { opened <- u; return nil }
+	defer func() { openURL = enroll.OpenBrowser }()
+	go func() {
+		u := <-opened
+		resp, err := http.PostForm(u, url.Values{"token": {"t"}, "email": {"other"}, "email_other": {"e@example.com"}})
+		if err == nil {
+			resp.Body.Close()
+		}
+	}()
+	var out, errOut bytes.Buffer
+	if code := run([]string{"login", "--data-dir", dir, "--server", srv.URL}, strings.NewReader(""), &out, &errOut); code != 0 {
+		t.Fatalf("exit %d: %s%s", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), " login --data-dir ") {
+		t.Errorf("no terminal command:\n%s", out.String())
+	}
+	if d, err := enroll.Load(dir); err != nil || d.Email != "e@example.com" {
+		t.Fatalf("%+v %v", d, err)
 	}
 }
 

@@ -4,11 +4,13 @@
 package e2e
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -95,7 +97,7 @@ func newWorld(t *testing.T) *world {
 }
 
 func (w *world) env() []string {
-	return append(os.Environ(), "NEO_TAX_AGENT_BIN="+agentBin, "NEO_TAX_DATA_DIR="+w.data, "CLAUDE_CODE_ENTRYPOINT=cli",
+	return append(os.Environ(), "NEO_TAX_AGENT_BIN="+agentBin, "NEO_TAX_DATA_DIR="+w.data, "CLAUDE_CODE_ENTRYPOINT=cli", "NEO_TAX_NO_BROWSER=1",
 		"GIT_CONFIG_GLOBAL=/dev/null", "CLAUDE_CONFIG_DIR="+w.config)
 }
 
@@ -287,13 +289,47 @@ func TestHookNeverFails(t *testing.T) {
 	}
 }
 
-// The login entry point prints what it needs when run without input.
+// Run as the login skill runs it, with no terminal, the login entry point
+// serves the browser form and enrolls when it is submitted; the token never
+// appears in its output.
 // @spec: device-enrollment#interactive-enrollment
-func TestLoginWithoutInputExplains(t *testing.T) {
+// @spec: device-enrollment#token-never-in-conversation
+func TestLoginWithoutTerminalEnrollsThroughTheForm(t *testing.T) {
 	w := newWorld(t)
-	out, code := w.shim("", "login", "--server", w.url)
-	if code != 3 || !strings.Contains(out, "--token") {
-		t.Fatalf("exit %d: %s", code, out)
+	cmd := exec.Command(filepath.Join(pluginDir, "bin", "neo-tax-agent"), "login", "--server", w.url)
+	cmd.Env = w.env()
+	cmd.Stdin = strings.NewReader("")
+	stdout, _ := cmd.StdoutPipe()
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	sc := bufio.NewScanner(stdout)
+	formURL := ""
+	for formURL == "" && sc.Scan() {
+		line := sc.Text()
+		out.WriteString(line + "\n")
+		if u := strings.TrimSpace(line); strings.HasPrefix(u, "http://127.0.0.1:") {
+			formURL = u
+		}
+	}
+	if formURL == "" {
+		cmd.Process.Kill()
+		t.Fatalf("no form address:\n%s", out.String())
+	}
+	resp, err := http.PostForm(formURL, url.Values{"token": {"et_e2e_secret"}, "email": {"other"}, "email_other": {"e2e@example.com"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	for sc.Scan() {
+		out.WriteString(sc.Text() + "\n")
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "Enrolled this device as e2e@example.com.") || strings.Contains(out.String(), "et_e2e_secret") {
+		t.Fatalf("output:\n%s", out.String())
 	}
 }
 

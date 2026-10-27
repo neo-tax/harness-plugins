@@ -84,6 +84,23 @@ func TestSkillsDelegateToAgent(t *testing.T) {
 	}
 }
 
+// The login command can wait five minutes for the browser form, longer than
+// a Bash call's default timeout, and the model must never relay the token.
+// @spec: device-enrollment#token-never-in-conversation
+// @spec: device-enrollment#browser-wait-bounded
+func TestLoginSkillWaitsForTheFormAndNeverAsksForTheToken(t *testing.T) {
+	b, err := os.ReadFile(pluginDir + "/skills/login/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, want := range []string{"timeout of 600000", "Never ask the engineer for the enrollment token"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("login skill lacks %q", want)
+		}
+	}
+}
+
 func TestManifestsNameThePluginNeoTax(t *testing.T) {
 	var p struct{ Name, Version string }
 	b, _ := os.ReadFile(pluginDir + "/.claude-plugin/plugin.json")
