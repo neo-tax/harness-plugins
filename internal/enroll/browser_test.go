@@ -391,3 +391,30 @@ func TestBrowserFormAsksForATokenWhenTheGivenOneIsRejected(t *testing.T) {
 		t.Fatalf("token %q", f.last.EnrollmentToken)
 	}
 }
+
+// The form's address is in the output before any result, even when the form
+// is submitted while the browser is still opening; and the form loads
+// without waiting for the browser launcher to return.
+// @spec: device-enrollment#browser-terminal-alternative
+func TestBrowserFormAddressPrintedFirst(t *testing.T) {
+	f := newFixture(t)
+	var loaded time.Duration
+	u, done := f.browserLogin(t, time.Minute, func(u string) error {
+		start := time.Now()
+		get(t, u)
+		loaded = time.Since(start)
+		submitAsync(u, url.Values{"token": {"et_good"}, "email": {"account@example.com"}})
+		time.Sleep(300 * time.Millisecond)
+		return nil
+	})
+	if err := wait(t, done); err != nil {
+		t.Fatal(err)
+	}
+	out := f.out.String()
+	if a, r := strings.Index(out, u), strings.Index(out, "Enrolled this device as"); a < 0 || r < 0 || a > r {
+		t.Fatalf("address after the result:\n%s", out)
+	}
+	if loaded > time.Second {
+		t.Errorf("form took %s to load while the browser opened", loaded)
+	}
+}

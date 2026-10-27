@@ -41,16 +41,8 @@ func OpenBrowser(url string) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	// A launcher that cannot open anything (xdg-open with no display) fails
-	// at once; one still running after a moment is showing the page.
-	exited := make(chan error, 1)
-	go func() { exited <- cmd.Wait() }()
-	select {
-	case err := <-exited:
-		return err
-	case <-time.After(1500 * time.Millisecond):
-		return nil
-	}
+	go cmd.Wait()
+	return nil
 }
 
 // browserLogin serves a one-page form on the loopback interface, at a path
@@ -171,16 +163,16 @@ func browserLogin(ctx context.Context, o Options, candidates []string, token, em
 		srv.Shutdown(sctx)
 	}()
 
-	// The address is printed under the lock, so a submit (which writes the
-	// result to the same output) waits until it is out.
+	// The address is printed under the lock before the browser is opened,
+	// so a submit (which writes its result to the same output) cannot come
+	// first, and the lock is not held while the launcher runs.
 	mu.Lock()
-	opener := "Opened your browser to finish enrolling with Neo.Tax:"
-	if o.OpenURL == nil || o.OpenURL(formURL) != nil {
-		opener = "Open this address in a browser on this machine to finish enrolling with Neo.Tax:"
-	}
-	fmt.Fprintf(o.Out, "%s\n  %s\nWaiting up to %s for the form. If this machine has no browser that can reach it (for example over SSH), run this in a terminal instead:\n  %s\n",
-		opener, formURL, minutes(wait), o.TerminalCommand)
+	fmt.Fprintf(o.Out, "To finish enrolling with Neo.Tax, open this address in a browser on this machine:\n  %s\nWaiting up to %s for the form. If this machine has no browser that can reach it (for example over SSH), run this in a terminal instead:\n  %s\n",
+		formURL, minutes(wait), o.TerminalCommand)
 	mu.Unlock()
+	if o.OpenURL != nil {
+		o.OpenURL(formURL)
+	}
 
 	timer := time.NewTimer(wait)
 	defer timer.Stop()
