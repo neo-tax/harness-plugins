@@ -399,13 +399,15 @@ func TestBrowserFormAsksForATokenWhenTheGivenOneIsRejected(t *testing.T) {
 func TestBrowserFormAddressPrintedFirst(t *testing.T) {
 	f := newFixture(t)
 	var loaded time.Duration
+	openErr := make(chan error, 1)
 	u, done := f.browserLogin(t, time.Minute, func(u string) error {
-		// This runs on Login's goroutine, so it reports errors rather than
-		// failing the test from here.
+		// This runs on Login's goroutine, so it hands errors to the test
+		// goroutine rather than failing the test from here.
 		start := time.Now()
 		resp, err := http.Get(u)
 		if err != nil {
-			return err
+			openErr <- err
+			return nil
 		}
 		resp.Body.Close()
 		loaded = time.Since(start)
@@ -413,8 +415,15 @@ func TestBrowserFormAddressPrintedFirst(t *testing.T) {
 		time.Sleep(300 * time.Millisecond)
 		return nil
 	})
-	if err := wait(t, done); err != nil {
-		t.Fatal(err)
+	select {
+	case err := <-openErr:
+		t.Fatalf("loading the form: %v", err)
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Login did not return")
 	}
 	out := f.out.String()
 	if a, r := strings.Index(out, u), strings.Index(out, "Enrolled this device as"); a < 0 || r < 0 || a > r {
