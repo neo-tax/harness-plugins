@@ -40,8 +40,16 @@ func OpenBrowser(url string) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	go cmd.Wait()
-	return nil
+	// A launcher that cannot open anything (xdg-open with no display) fails
+	// at once; one still running after a moment is showing the page.
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	select {
+	case err := <-exited:
+		return err
+	case <-time.After(1500 * time.Millisecond):
+		return nil
+	}
 }
 
 // browserLogin serves a one-page form on the loopback interface, at a path
@@ -79,7 +87,10 @@ func browserLogin(ctx context.Context, o Options, candidates []string, email str
 	var (
 		mu       sync.Mutex
 		enrolled = make(chan string, 1)
-		done     bool
+		// closed is set once the form stops taking submits: on success
+		// (with as set to the enrolled email) or when the wait ends.
+		closed bool
+		as     string
 	)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// A page on another origin that rebinds its name to 127.0.0.1
@@ -118,8 +129,8 @@ func browserLogin(ctx context.Context, o Options, candidates []string, email str
 			chosen = strings.TrimSpace(chosen)
 			mu.Lock()
 			defer mu.Unlock()
-			if done {
-				page.Done = true
+			if closed {
+				page.Done, page.Expired, page.Email = as != "", as == "", as
 				page.render(w)
 				return
 			}
@@ -128,7 +139,7 @@ func browserLogin(ctx context.Context, o Options, candidates []string, email str
 				page.render(w)
 				return
 			}
-			done = true
+			closed, as = true, chosen
 			page.Done, page.Email = true, chosen
 			page.render(w)
 			enrolled <- chosen
@@ -162,8 +173,8 @@ func browserLogin(ctx context.Context, o Options, candidates []string, email str
 	// Close the form under the lock, so a submit already enrolling finishes
 	// first and is reported as the success it was.
 	mu.Lock()
-	finished := done
-	done = true
+	finished := as != ""
+	closed = true
 	mu.Unlock()
 	if finished {
 		return nil
@@ -187,6 +198,7 @@ type formPage struct {
 	Email      string
 	Error      string
 	Done       bool
+	Expired    bool
 }
 
 func (p formPage) render(w http.ResponseWriter) {
@@ -236,7 +248,10 @@ button { margin-top: 20px; width: 100%; padding: 10px; border: 0; border-radius:
 </head>
 <body>
 <main><div class="card">
-{{if .Done}}
+{{if .Expired}}
+<h1>Login expired</h1>
+<p>This login form is no longer waiting. Run /neo-tax:login in Claude Code again.</p>
+{{else if .Done}}
 <h1>Enrolled</h1>
 <p>This device is enrolled with Neo.Tax as {{.Email}}. You can close this tab and return to Claude Code.</p>
 {{else}}

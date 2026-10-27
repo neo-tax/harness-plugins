@@ -280,3 +280,66 @@ func TestBrowserFormWorksWhenNoBrowserOpens(t *testing.T) {
 		t.Errorf("address not printed:\n%s", f.out.String())
 	}
 }
+
+// submitAsync posts the form from another goroutine and delivers the page.
+func submitAsync(u string, fields url.Values) <-chan string {
+	page := make(chan string, 1)
+	go func() {
+		resp, err := http.PostForm(u, fields)
+		if err != nil {
+			page <- err.Error()
+			return
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		page <- string(b)
+	}()
+	return page
+}
+
+// slowEnroll makes the fixture's enrollment endpoint answer only after d.
+func (f *fixture) slowEnroll(t *testing.T, d time.Duration) {
+	t.Helper()
+	inner := f.srv.Config.Handler
+	f.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/enroll" {
+			time.Sleep(d)
+		}
+		inner.ServeHTTP(w, r)
+	})
+}
+
+// A submit still enrolling when the wait ends is reported as the success
+// it is, not as a login that was not completed.
+// @spec: device-enrollment#browser-wait-bounded
+func TestBrowserWaitEndsDuringASuccessfulSubmit(t *testing.T) {
+	f := newFixture(t)
+	f.slowEnroll(t, 800*time.Millisecond)
+	u, done := f.browserLogin(t, 300*time.Millisecond, nil)
+	submitAsync(u, url.Values{"token": {"et_good"}, "email": {"account@example.com"}})
+	if err := wait(t, done); err != nil {
+		t.Fatalf("err %v\n%s", err, f.out.String())
+	}
+	if _, err := enroll.Load(f.dir); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(f.out.String(), "not completed") {
+		t.Errorf("reported failure:\n%s", f.out.String())
+	}
+}
+
+// A submit that fails as the wait ends leaves the login not completed, and
+// the form then says it has expired rather than offering another try.
+// @spec: device-enrollment#browser-wait-bounded
+func TestBrowserWaitEndsDuringAFailedSubmit(t *testing.T) {
+	f := newFixture(t)
+	f.slowEnroll(t, 800*time.Millisecond)
+	u, done := f.browserLogin(t, 300*time.Millisecond, nil)
+	page := submitAsync(u, url.Values{"token": {"et_expired"}, "email": {"account@example.com"}})
+	if err := wait(t, done); !errors.Is(err, enroll.ErrLoginNotCompleted) {
+		t.Fatalf("err %v", err)
+	}
+	if p := <-page; strings.Contains(p, "is enrolled") {
+		t.Errorf("failed submit shown as enrolled:\n%s", p)
+	}
+}
