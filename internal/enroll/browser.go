@@ -171,12 +171,16 @@ func browserLogin(ctx context.Context, o Options, candidates []string, token, em
 		srv.Shutdown(sctx)
 	}()
 
+	// The address is printed under the lock, so a submit (which writes the
+	// result to the same output) waits until it is out.
+	mu.Lock()
 	opener := "Opened your browser to finish enrolling with Neo.Tax:"
 	if o.OpenURL == nil || o.OpenURL(formURL) != nil {
 		opener = "Open this address in a browser on this machine to finish enrolling with Neo.Tax:"
 	}
 	fmt.Fprintf(o.Out, "%s\n  %s\nWaiting up to %s for the form. If this machine has no browser that can reach it (for example over SSH), run this in a terminal instead:\n  %s\n",
 		opener, formURL, minutes(wait), o.TerminalCommand)
+	mu.Unlock()
 
 	timer := time.NewTimer(wait)
 	defer timer.Stop()
