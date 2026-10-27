@@ -150,7 +150,7 @@ func Login(ctx context.Context, o Options) error {
 		candidates := emailCandidates(ctx, o.AccountEmail)
 		if !o.Interactive {
 			if o.Browser {
-				return browserLogin(ctx, o, candidates, email)
+				return browserLogin(ctx, o, candidates, token, email)
 			}
 			fmt.Fprintf(o.Out, "Enrolling needs your Neo.Tax enrollment token, which should not go through this conversation. Run this in a terminal:\n  %s\n", o.TerminalCommand)
 			return ErrNeedInput

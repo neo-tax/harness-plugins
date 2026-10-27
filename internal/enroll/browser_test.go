@@ -339,7 +339,31 @@ func TestBrowserWaitEndsDuringAFailedSubmit(t *testing.T) {
 	if err := wait(t, done); !errors.Is(err, enroll.ErrLoginNotCompleted) {
 		t.Fatalf("err %v", err)
 	}
-	if p := <-page; strings.Contains(p, "is enrolled") {
-		t.Errorf("failed submit shown as enrolled:\n%s", p)
+	if p := <-page; !strings.Contains(p, "Login expired") || strings.Contains(p, `type="password"`) {
+		t.Errorf("failed submit as the wait ended not shown as expired:\n%s", p)
+	}
+}
+
+// A token given on the command line without an email is used; the form
+// asks only for the email.
+// @spec: device-enrollment#interactive-enrollment
+func TestBrowserFormUsesAGivenToken(t *testing.T) {
+	f := newFixture(t)
+	o := f.opts("et_good", "")
+	o.Browser, o.Wait = true, time.Minute
+	addr := make(chan string, 1)
+	o.OpenURL = func(u string) error { addr <- u; return nil }
+	done := make(chan error, 1)
+	go func() { done <- enroll.Login(context.Background(), o) }()
+	u := <-addr
+	if _, page := get(t, u); strings.Contains(page, `type="password"`) {
+		t.Errorf("token asked for again:\n%s", page)
+	}
+	submit(t, u, url.Values{"email": {"account@example.com"}})
+	if err := wait(t, done); err != nil {
+		t.Fatal(err)
+	}
+	if f.last.EnrollmentToken != "et_good" {
+		t.Fatalf("token %q", f.last.EnrollmentToken)
 	}
 }

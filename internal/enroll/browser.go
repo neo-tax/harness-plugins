@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -62,7 +63,7 @@ func OpenBrowser(url string) error {
 // @spec: device-enrollment#browser-form-loopback
 // @spec: device-enrollment#browser-form-retries
 // @spec: device-enrollment#browser-terminal-alternative
-func browserLogin(ctx context.Context, o Options, candidates []string, email string) error {
+func browserLogin(ctx context.Context, o Options, candidates []string, token, email string) error {
 	wait := o.Wait
 	if wait == 0 {
 		wait = BrowserWait
@@ -91,6 +92,10 @@ func browserLogin(ctx context.Context, o Options, candidates []string, email str
 		// (with as set to the enrolled email) or when the wait ends.
 		closed bool
 		as     string
+		// expired is set as soon as the wait ends, before the lock is
+		// taken, so a submit failing at that moment is not offered a
+		// retry the form will no longer take.
+		expired atomic.Bool
 	)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// A page on another origin that rebinds its name to 127.0.0.1
@@ -108,7 +113,7 @@ func browserLogin(ctx context.Context, o Options, candidates []string, email str
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'")
-		page := formPage{Candidates: candidates, Email: email}
+		page := formPage{Candidates: candidates, Email: email, HasToken: token != ""}
 		switch r.Method {
 		case http.MethodGet:
 			page.render(w)
@@ -118,7 +123,10 @@ func browserLogin(ctx context.Context, o Options, candidates []string, email str
 				http.Error(w, "bad request", http.StatusBadRequest)
 				return
 			}
-			token := strings.TrimSpace(r.PostFormValue("token"))
+			submitted := token
+			if submitted == "" {
+				submitted = strings.TrimSpace(r.PostFormValue("token"))
+			}
 			// The page runs no script, so typing another email does not
 			// select its radio button: a typed email wins over the
 			// candidate that was selected by default.
@@ -134,8 +142,8 @@ func browserLogin(ctx context.Context, o Options, candidates []string, email str
 				page.render(w)
 				return
 			}
-			if err := exchange(r.Context(), o, token, chosen); err != nil {
-				page.Error, page.Email = err.Error(), chosen
+			if err := exchange(r.Context(), o, submitted, chosen); err != nil {
+				page.Error, page.Email, page.Expired = err.Error(), chosen, expired.Load()
 				page.render(w)
 				return
 			}
@@ -172,6 +180,7 @@ func browserLogin(ctx context.Context, o Options, candidates []string, email str
 	}
 	// Close the form under the lock, so a submit already enrolling finishes
 	// first and is reported as the success it was.
+	expired.Store(true)
 	mu.Lock()
 	finished := as != ""
 	closed = true
@@ -199,6 +208,7 @@ type formPage struct {
 	Error      string
 	Done       bool
 	Expired    bool
+	HasToken   bool
 }
 
 func (p formPage) render(w http.ResponseWriter) {
@@ -250,16 +260,17 @@ button { margin-top: 20px; width: 100%; padding: 10px; border: 0; border-radius:
 <main><div class="card">
 {{if .Expired}}
 <h1>Login expired</h1>
+{{if .Error}}<p class="err" role="alert">{{.Error}}</p>{{end}}
 <p>This login form is no longer waiting. Run /neo-tax:login in Claude Code again.</p>
 {{else if .Done}}
 <h1>Enrolled</h1>
 <p>This device is enrolled with Neo.Tax as {{.Email}}. You can close this tab and return to Claude Code.</p>
 {{else}}
 <h1>Enroll with Neo.Tax</h1>
-<p>Paste the enrollment token your Neo.Tax admin shared. It goes from this page to the agent on your machine, and never into your Claude Code conversation.</p>
+{{if .HasToken}}<p>Confirm the work email Neo.Tax should know you by.</p>{{else}}<p>Paste the enrollment token your Neo.Tax admin shared. It goes from this page to the agent on your machine, and never into your Claude Code conversation.</p>{{end}}
 <form method="post">
-<label for="token">Enrollment token</label>
-<input id="token" name="token" type="password" autocomplete="off" required autofocus>
+{{if not .HasToken}}<label for="token">Enrollment token</label>
+<input id="token" name="token" type="password" autocomplete="off" required autofocus>{{end}}
 {{if .Candidates}}<fieldset>
 <legend>Your work email</legend>
 {{range .Candidates}}<label class="choice"><input type="radio" name="email" value="{{.}}"{{if $.IsCandidate .}} checked{{end}}> {{.}}</label>

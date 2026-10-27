@@ -45,6 +45,7 @@ func TestLoginCommand(t *testing.T) {
 // @spec: device-enrollment#interactive-enrollment
 // @spec: device-enrollment#browser-terminal-alternative
 func TestLoginWithoutTerminalUsesTheBrowserForm(t *testing.T) {
+	t.Setenv("NEO_TAX_NO_BROWSER", "")
 	startBackfill = func(string, bool) error { return nil }
 	srv := httptest.NewServer(fakeingest.New(fakeingest.Options{}))
 	defer srv.Close()
