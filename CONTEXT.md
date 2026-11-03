@@ -18,7 +18,7 @@ The code that runs on an engineer's machine to observe AI coding sessions and re
 
 **Session event**: A normalized record the agent emits about a session (opened, turn, PR opened, closed), carrying only the device id and non-personal session metadata. _Avoid_: event, usage record, telemetry
 
-**Turn**: One assistant message within a session, identified by the harness's message id; the unit at which usage is reported. A turn produced by a subagent belongs to the parent session and carries the subagent's id.
+**Turn**: One API call's assistant response within a session; the unit at which usage is reported. A session event identifies it by the harness's message id, and the server joins it with telemetry on the vendor's request id. A turn produced by a subagent belongs to the parent session and carries the subagent's id.
 
 **Subagent**: A child agent a harness spawns inside a session, with its own transcript and message ids but no session of its own. _Avoid_: sidechain, child session, sub-session _Avoid_: request, response, step
 
