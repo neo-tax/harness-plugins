@@ -43,12 +43,13 @@ Governs Neo.Tax's second entry point into the session record: an OpenTelemetry (
 - `telemetry-turn-idempotent`(approved): Two telemetry turns in one organization with the same request id are one turn, so a re-exported record adds nothing.
 - `telemetry-turn-without-request-id`(draft): A telemetry turn without a `request_id` is keyed by its session id, timestamp, and model, and never joins a plugin turn.
 - `join-on-request-id`(approved): A plugin `session.turn` and a telemetry turn in the same organization with the same non-null request id are one turn, counted once.
+- `one-turn-per-request-id`(draft): Plugin turns in one organization that share a request id are one turn: the first stored keeps its session, and later ones are counted as duplicates.
 - `join-order-independent`(approved): A joined turn is the same whichever of its two paths arrives first.
 - `telemetry-wins-usage`(approved): A joined turn takes its model, token counts, and cost from telemetry.
 - `plugin-wins-context`(approved): A joined turn takes its session, branch, head SHA, and subagent id from the plugin, and telemetry never sets them.
 - `pr-opened-plugin-only`(approved): A session's pull requests opened come only from the plugin's `session.pr_opened` events.
 - `single-path-turn-kept`(approved): A turn that arrives through only one path is stored as it arrived: a telemetry-only turn has no branch, and a plugin-only turn keeps its transcript usage.
-- `side-usage-yields-to-telemetry`(draft): A session in which every plugin turn joined a telemetry turn does not add its plugin `side_usage` to its usage, because telemetry reports those side calls as turns of their own; any other session adds it.
+- `side-usage-yields-to-telemetry`(draft): A session with at least one plugin turn, every one of which joined a telemetry turn, does not add its plugin `side_usage` to its usage, because telemetry reports those side calls as turns of their own; any other session adds it.
 
 ## Design Notes
 
@@ -81,11 +82,13 @@ The endpoint answers rejected records through OTLP's own `partial_success` rathe
 - **The ingest key leaks from a managed machine.** Anyone holding it can write false telemetry into that organization. Accepted for a write-only key; revoke and remint for that destination.
 - **The plugin and telemetry disagree on a joined turn's usage.** Telemetry's counts are taken silently. Accepted; the difference between the two is itself a measure of the transcript parser's accuracy.
 - **Telemetry covers only part of a session.** An exporter turned on mid-session, or records lost in transit, leave some turns plugin-only, so that session adds the plugin's whole `side_usage` on top of the side calls telemetry did report. Accepted as a small overcount on partly covered sessions, which the rate of plugin-only turns per session makes visible.
+- **An exporter is left on OTLP's protobuf default.** Every request is refused with 415 and nothing arrives. Mitigated by the managed settings and the setup instructions for each source setting the protocol to `http/json`.
 - **An exporter also sends metrics.** The dogfood managed settings set a metrics exporter, so the same base endpoint receives `/otlp/v1/metrics` requests it does not accept, and the exporter logs and retries them. Mitigated by leaving the metrics exporter out of managed settings.
 
 ## Open Questions
 
 - Whether Claude Code's `session.id` always equals the `session_id` its hooks receive, so a telemetry-only turn and the plugin's `session.opened` name the same session.
+- Whether a forked Claude Code session re-sends its parent's turns under the new session id with the same request ids, which `one-turn-per-request-id` assumes it may.
 - What a turn without a `request_id` should be keyed by, and whether such turns occur on the Anthropic API at all.
 - Whether `/otlp/v1/metrics` should be answered with success and nothing stored, so a customer who keeps the metrics exporter on sees no errors.
 - Whether the privacy statement should describe this path, since what telemetry sends is set by the customer's admin, not by the plugin.
