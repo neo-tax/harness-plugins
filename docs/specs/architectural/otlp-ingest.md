@@ -4,8 +4,8 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-11-02
-updated: 2026-11-02
-version: 1
+updated: 2026-11-03
+version: 2
 affects:
 ---
 
@@ -16,11 +16,12 @@ Governs Neo.Tax's second entry point into the session record: an OpenTelemetry (
 ## Requirements
 
 - `second-entry-point`(approved): The OTLP endpoint writes to the same session record as the plugin's ingest endpoint, and a session's turns can arrive through either path or both.
-- `otlp-http-json-logs`(approved): The endpoint accepts OTLP/HTTP log export requests with JSON bodies at `/otlp/v1/logs` on the Neo.Tax API host, the path a standard exporter derives from the base endpoint `https://api.neo.tax/otlp`.
-- `json-only`(approved): An authenticated request whose content type is not `application/json` is answered 415 without its body being read.
+- `otlp-http-logs`(approved): The endpoint accepts OTLP/HTTP log export requests at `/otlp/v1/logs` on the Neo.Tax API host, the path a standard exporter derives from the base endpoint `https://api.neo.tax/otlp`.
+- `json-and-protobuf`(approved): An authenticated request is decoded as OTLP/JSON when its content type is `application/json` and as OTLP protobuf when it is `application/x-protobuf`, and both decode to the same records before any mapping runs; any other content type is answered 415 without its body being read.
+- `gzip-accepted`(approved): A body sent with `Content-Encoding: gzip` is decompressed before it is decoded, and a body whose decompressed size exceeds the endpoint's limit is answered 413 and nothing in it is stored.
 - `authenticate-first`(approved): The ingest key is checked before the content type or the body, so a request with a bad key is answered 401 whatever else is wrong with it.
 - `malformed-request-refused`(approved): A body that is not an OTLP log export request is answered 400 and nothing in it is stored.
-- `partial-success`(approved): A request in which some records are rejected is answered 200 with OTLP/JSON's `partialSuccess`, carrying `rejectedLogRecords` and an `errorMessage` naming why the first was rejected; the request's other records are stored.
+- `partial-success`(approved): A request in which some records are rejected is answered 200 with OTLP's partial success message in the request's encoding (in JSON, `partialSuccess` carrying `rejectedLogRecords` and an `errorMessage` naming why the first was rejected); the request's other records are stored.
 - `ingest-key-bearer`(approved): A request authenticates with an ingest key sent as a bearer token in the `Authorization` header, so an exporter can carry it as a static header.
 - `ingest-key-refusal`(approved): A missing, unknown, or revoked ingest key is answered 401 with the same body for each, and nothing in the request is stored.
 - `ingest-key-organization`(approved): An ingest key belongs to exactly one organization, and every record accepted under it is stored in that organization.
@@ -38,18 +39,22 @@ Governs Neo.Tax's second entry point into the session record: an OpenTelemetry (
 - `claude-code-repo-mapping`(approved): A Claude Code turn's repo is the host of `vcs.repository.url.full` with `vcs.owner.name` and `vcs.repository.name`, each lowercase, in the same shape as the wire contract's `repo`, and is null when those attributes are absent.
 - `numeric-attribute-encodings`(approved): A token count is read from an `intValue` or from a `stringValue` holding a base-10 integer, and a cost from a `doubleValue`, an `intValue`, or a `stringValue` holding a decimal number.
 - `claude-code-record-rejected`(approved): A `claude_code.api_request` record without a `session.id`, missing `input_tokens`, `output_tokens`, or `cache_read_tokens`, or with a token count that is not a non-negative integer, is rejected.
-- `claude-code-optional-attributes`(approved): Of the mapped attributes, only `session.id` and the input, output, and cache read counts are required: a missing `model` or `user.email` is stored as null, a missing or unparseable `event.timestamp` falls back to the log record's `timeUnixNano` when it is non-zero, then to its `observedTimeUnixNano` when it is non-zero, and a record with none of the three is rejected, and a missing `request_id` follows `telemetry-turn-without-request-id`.
+- `claude-code-optional-attributes`(approved): Of the mapped attributes, only `session.id` and the input, output, and cache read counts are required: a missing `model` or `user.email` is stored as null, a missing or unparseable `event.timestamp` falls back to the log record's `timeUnixNano` when it is non-zero, then to its `observedTimeUnixNano` when it is non-zero, and a record with none of the three is rejected, and a missing `request_id` leaves the turn to `join-on-fingerprint` and `turn-without-call-id`.
 - `claude-code-missing-cache-write`(draft): A record with neither the split cache write attributes nor `cache_creation_tokens` has zero cache writes.
 - `claude-code-cost-optional`(approved): A `claude_code.api_request` record whose `cost_usd` is missing or unreadable is stored with a null cost rather than rejected, because its usage is still exact.
-- `server-allowlist`(approved): Of each record the endpoint keeps only the attributes its source's mapping names: model, token counts, estimated cost, event timestamp, session id, request id, user email, and repo; no other attribute, resource attribute, or record body is stored.
+- `server-allowlist`(approved): Of each record the endpoint keeps only the attributes its source's mapping names: model, token counts, estimated cost, event timestamp, session id, call ids, user email, and repo; no other attribute, resource attribute, or record body is stored.
 - `content-never-stored`(approved): Prompt text, response text, tool inputs and outputs, commands, file paths, and API bodies are dropped even when the sending harness is configured to export them.
 - `allowlist-before-write`(approved): The allowlist is applied before any part of a record is written to storage or to a log line.
 - `engineer-from-user-email`(approved): A telemetry-only turn's engineer is its `user.email`, resolved to a contributor the same way a device's confirmed email is; a turn without `user.email` is stored with no engineer.
 - `estimated-cost-labeled`(approved): A telemetry turn's cost is stored as the harness's own estimate, distinct from list-price, billed, or invoiced cost.
-- `telemetry-turn-idempotent`(approved): Two telemetry turns in one organization with the same request id are one turn, so a re-exported record adds nothing.
-- `telemetry-turn-without-request-id`(draft): A telemetry turn without a `request_id` is keyed by its session id, timestamp, and model, and never joins a plugin turn.
-- `join-on-request-id`(approved): A plugin `session.turn` and a telemetry turn in the same organization with the same non-null request id are one turn, counted once.
-- `one-turn-per-request-id`(draft): Plugin turns in one organization that share a request id are one turn: the first stored keeps its session, and later ones are counted as duplicates.
+- `call-ids`(approved): A turn's call ids are the model provider's own ids for the API call it records: its response id (the plugin's `message_id`; OTLP's `gen_ai.response.id`) and its request id (the plugin's `request_id`; Claude Code telemetry's `request_id`). Either may be null, and a source's mapping names which attributes carry them.
+- `join-on-response-id`(approved): Two turns in one organization with the same non-null response id are one turn, counted once, whichever paths or sources they arrived through.
+- `join-on-request-id`(approved): Two turns in one organization that were not joined by response id and share a non-null request id are one turn, counted once, unless both carry response ids and those differ.
+- `telemetry-turn-idempotent`(approved): A re-exported telemetry record is joined to its earlier copy by `join-on-response-id` or `join-on-request-id`, so it adds nothing.
+- `join-on-fingerprint`(draft): A telemetry turn with neither call id joins another turn in its organization only when that turn is the only one matching it on model and on every token count, within five seconds of its timestamp, with the same engineer when both have one, and it is the only telemetry turn matching that turn; a tie joins nothing.
+- `turn-without-call-id`(draft): A telemetry turn with neither call id and no fingerprint match is stored on its own, keyed by its session id, timestamp, and model.
+- `one-turn-per-call-id`(draft): Plugin turns in one organization that share a call id are one turn: the first stored keeps its session, and later ones are counted as duplicates.
+- `join-key-recorded`(approved): A joined turn records the key that joined it (response id, request id, or fingerprint), so the join rate can be measured per source and per key.
 - `join-order-independent`(approved): A joined turn is the same whichever of its two paths arrives first.
 - `telemetry-wins-usage`(approved): A joined turn takes its token counts and cost from telemetry, and its model from telemetry when telemetry carries one, else from the plugin.
 - `plugin-wins-context`(approved): A joined turn takes its session, engineer, timestamp, repo, branch, head SHA, and subagent id from the plugin, its engineer being the one its device resolves to, and telemetry never sets them.
@@ -68,11 +73,13 @@ The credential is per organization, not per device, because an exporter is confi
 
 A telemetry record identifies the engineer directly, through the harness's sign-in email, where a session event identifies only its device. That email is the harness vendor's account, not one the engineer confirmed to Neo.Tax, so it is resolved through the same contributor matcher and is no more trusted than a device's email.
 
-The request id is the join key because both paths carry the vendor's own id for the same API call, unchanged: the plugin reads it from the transcript and telemetry from the response header. A session id would not do. Claude Code replaces `session.id` on `/clear`, and a session id names a whole session, not a turn. A request id names one API call across every session, so the join and the telemetry idempotency key are the organization and request id alone, and a joined turn belongs to the plugin's session, which its `session.opened` and `session.pr_opened` events also name. Plugin turns that repeat a request id collapse to the first, so the key stays one-to-one. Joining on the request id lets each path supply what it is good at. Telemetry has the supported usage and Claude Code's cost estimate. The plugin has the branch and head SHA per turn and the pull requests opened. Running both is what lets v0.1 measure how often sessions match a pull request with the plugin's branch and without it.
+Turns join on call ids because they are the model provider's own ids for one API call, so every path that saw the call carries the same value: the plugin reads them from the transcript, Claude Code's telemetry from the response, and a gateway from the response it relayed. The response id comes first because it is in the response body, which a gateway must pass through intact; the request id is a response header, which a gateway may replace with its own (OpenRouter reports the provider's only in its Cost metadata), and some gateways, Kong's AI Gateway among them, export the response id and not the request id. The request id is the second key because Claude Code's telemetry carries it and not the response id. A source that carries neither, such as a gateway that drops both, can still join on a fingerprint of model, token counts, and time, but only when the match is unique, because a wrong join would move one engineer's usage into another's session. Recording which key joined each turn turns the strength of the join into a measured rate rather than an assumption. A session id would not do. Claude Code replaces `session.id` on `/clear`, and a session id names a whole session, not a turn. A request id names one API call across every session, so the join and the telemetry idempotency key are the organization and a call id alone, and a joined turn belongs to the plugin's session, which its `session.opened` and `session.pr_opened` events also name. Plugin turns that repeat a call id collapse to the first, so the key stays one-to-one. Joining on call ids lets each path supply what it is good at. Telemetry has the supported usage and Claude Code's cost estimate. The plugin has the branch and head SHA per turn and the pull requests opened. Running both is what lets v0.1 measure how often sessions match a pull request with the plugin's branch and without it.
 
 Telemetry reports every API call, including the side calls (session title, recap, compaction summary) that the plugin can see only as session totals on `session.closed`. Adding both would count side calls twice, so when telemetry covered every turn the plugin saw, the plugin's `side_usage` stops contributing to that session's usage.
 
-The endpoint answers rejected records through OTLP's own `partialSuccess` rather than a Neo.Tax shape, so an unmodified exporter handles the response correctly. OTLP's response carries a count and one message, not a per-record index the way the plugin's ingest response does.
+The endpoint takes both of OTLP/HTTP's encodings because a sender's choice is not ours to make. JSON is what Claude Code sends when managed settings ask for it, but protobuf is OTLP's default: the OpenTelemetry Collector's exporter, most SDKs, and Kong's AI Gateway send nothing else, and a customer's existing collector is the usual way a gateway's telemetry would reach us. Both encodings are the same schema, so they decode to the same records and the mapping, allowlist, and join never see the difference.
+
+The endpoint answers rejected records through OTLP's own partial success message rather than a Neo.Tax shape, so an unmodified exporter handles the response correctly. OTLP's response carries a count and one message, not a per-record index the way the plugin's ingest response does.
 
 ## Alternatives Considered
 
@@ -82,6 +89,8 @@ The endpoint answers rejected records through OTLP's own `partialSuccess` rather
 | Plugin only | One credential, one allowlist, one contract | Transcript usage depends on an unsupported format; no cloud sessions; every gateway needs custom work |
 | Route telemetry through the agent | The agent's allowlist would apply | The agent does not run in cloud sessions or gateways, which are the reason for this path |
 | Device key on the exporter | Reuses the existing credential | An exporter cannot enroll, and one shared device key breaks the one-engineer-per-key rule |
+| JSON only | One decoder; requests are readable in logs | Refuses OTLP's default encoding, so the Collector, most SDKs, and Kong's AI Gateway cannot connect without reconfiguration they may not offer |
+| Join on request id only | One key, exact | Misses every source that carries the response id and not the request id, which includes gateways that replace the request id |
 
 ## Risks
 
@@ -89,13 +98,16 @@ The endpoint answers rejected records through OTLP's own `partialSuccess` rather
 - **The ingest key leaks from a managed machine.** Anyone holding it can write false telemetry into that organization. Accepted for a write-only key; revoke and remint for that destination.
 - **The plugin and telemetry disagree on a joined turn's usage.** Telemetry's counts are taken silently. Accepted; the difference between the two is itself a measure of the transcript parser's accuracy.
 - **Telemetry covers only part of a session.** An exporter turned on mid-session, or records lost in transit, leave some turns plugin-only, so that session adds the plugin's whole `side_usage` on top of the side calls telemetry did report. Accepted as a small overcount on partly covered sessions, which the rate of plugin-only turns per session makes visible.
-- **An exporter is left on OTLP's protobuf default.** Every request is refused with 415 and nothing arrives. Mitigated by the managed settings and the setup instructions for each source setting the protocol to `http/json`.
+- **A fingerprint joins two different calls.** One engineer's usage lands in another call's turn. Mitigated by requiring a unique match on every token count within five seconds, and made visible by `join-key-recorded`; if the fingerprint's share of joins is high for a source, that source needs a call id instead.
+- **A compressed body expands without bound.** A small gzip request could exhaust memory. Mitigated by the decompressed size limit in `gzip-accepted`.
 - **An exporter also sends metrics.** The dogfood managed settings set a metrics exporter, so the same base endpoint receives `/otlp/v1/metrics` requests it does not accept, and the exporter logs and retries them. Mitigated by leaving the metrics exporter out of managed settings.
 
 ## Open Questions
 
 - Whether Claude Code's `session.id` always equals the `session_id` its hooks receive, so a telemetry-only turn and the plugin's `session.opened` name the same session.
-- Whether a forked Claude Code session re-sends its parent's turns under the new session id with the same request ids, which `one-turn-per-request-id` assumes it may.
-- What a turn without a `request_id` should be keyed by, and whether such turns occur on the Anthropic API at all.
+- Whether a forked Claude Code session re-sends its parent's turns under the new session id with the same request ids, which `one-turn-per-call-id` assumes it may.
+- What a turn without a call id should be keyed by, and whether such turns occur on the Anthropic API at all.
+- How to group a source's telemetry-only turns into sessions when it sends no session id (Kong's spans carry none): by trace id, or by ingest key, engineer, and an idle gap.
+- Whether Claude Code's telemetry can carry the response id, which would let its turns join on the stronger key.
 - Whether `/otlp/v1/metrics` should be answered with success and nothing stored, so a customer who keeps the metrics exporter on sees no errors.
 - Whether the privacy statement should describe this path, since what telemetry sends is set by the customer's admin, not by the plugin.

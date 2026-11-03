@@ -69,7 +69,7 @@ The contract carries one event per assistant message rather than a cumulative pe
 
 `email_confirmed_by` is in the enrollment request from the first version even though v0.1 only ever sends `engineer`, so managed enrollment in v1.0 adds no server-side change.
 
-Harness-specific identifiers (`session_id`, `message_id`, `request_id`, `subagent_id`) are passed through as the harness produced them; the contract does not normalize them beyond requiring strings. The request id is held to that most strictly (`claude-code-transcript-parser#request-id-from-transcript`), because it is the one identifier a harness's own telemetry also carries: the server joins a turn from this contract with the telemetry record for the same API call on it, so a normalized or synthesized value would split one turn into two.
+Harness-specific identifiers (`session_id`, `message_id`, `request_id`, `subagent_id`) are passed through as the harness produced them; the contract does not normalize them beyond requiring strings. The message id and request id are held to that most strictly (`claude-code-transcript-parser#message-id-is-provider-id`, `claude-code-transcript-parser#request-id-from-transcript`), because they are the model provider's own ids for the API call, which telemetry and gateways also carry: the server joins a turn from this contract with another source's record of the same call on them (`otlp-ingest#call-ids`), so a normalized or synthesized value would split one turn into two.
 
 ## Risks
 
