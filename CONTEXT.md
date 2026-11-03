@@ -36,6 +36,10 @@ The code that runs on an engineer's machine to observe AI coding sessions and re
 
 **Enrollment token**: A short-lived token an admin mints and circulates so that devices can enroll; it can do nothing but enroll.
 
+**Telemetry**: A harness's own OpenTelemetry export, configured by the customer's admin and sent straight to Neo.Tax's OTLP endpoint without passing through the agent; Claude Code reports each API call as a `claude_code.api_request` record. _Avoid_: session event (that is the agent's), OTel data
+
+**Ingest key**: The organization-level credential a telemetry exporter or gateway presents to the OTLP endpoint; it authorizes OTLP ingest only and identifies no device or engineer. _Avoid_: device key, API key, OTLP token
+
 **Wire contract**: The JSON Schema definitions of every request and response between the agent and Neo.Tax, owned by this repo and versioned by `contract_version`. _Avoid_: API, protocol, payload format
 
 **Cursor**: The agent's record, per transcript, of how far it has read and the last message it emitted, so each hook reads only the new tail.
@@ -58,6 +62,8 @@ The code that runs on an engineer's machine to observe AI coding sessions and re
 - A **Device** holds exactly one **Device key**, obtained through one **Enrollment**.
 - A **Device key** identifies exactly one engineer; a **Session event** identifies its **Device**, never the engineer directly.
 - A **Session** produces one or more **Session events**.
+- A **Turn** can arrive as a **Session event**, as **Telemetry**, or both; the server joins the two on the vendor's request id.
+- An **Ingest key** belongs to one organization, never to a **Device**.
 
 ## Example dialogue
 

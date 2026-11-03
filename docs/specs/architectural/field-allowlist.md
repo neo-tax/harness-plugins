@@ -5,7 +5,7 @@ owner:
   - Firas Abuzaid
 created: 2026-10-24
 updated: 2026-11-13
-version: 5
+version: 6
 affects:
   - internal/allowlist/*.go
   - contract/types.go
@@ -47,9 +47,11 @@ Governs the single list of fields the agent is permitted to emit, how it is enfo
 
 ## Design Notes
 
-Customers' security teams ask exactly what leaves an engineer's machine, and the answer has to be the same for every harness. One allowlist held by the shared agent, applied below every adapter, is what makes that answer true by construction rather than by review. The working-directory path is excluded because it leaks usernames, directory names, and client names, and the normalized repository identity already carries everything the join needs. A model-written session title is excluded because it is conversation content, not metadata. The vendor's request id is included because it is not personal and is the only key that could reconcile a turn to a vendor's usage export exactly.
+Customers' security teams ask exactly what leaves an engineer's machine, and the answer has to be the same for every harness. One allowlist held by the shared agent, applied below every adapter, is what makes that answer true by construction rather than by review. The working-directory path is excluded because it leaks usernames, directory names, and client names, and the normalized repository identity already carries everything the join needs. A model-written session title is excluded because it is conversation content, not metadata. The vendor's request id is included because it is not personal and is the only key that could reconcile a turn to a vendor's usage export, or to the harness's own telemetry, exactly.
 
 The allowlist lives in the shared agent rather than in the schema validator because the schema says what is valid, not what is permitted: a schema with `additionalProperties` false would reject an over-full event at the server, after it had already left the laptop. Enforcement has to happen before the queue. The allowlist checks names, not values, so an adapter bug could still put a path or prompt text into a permitted string field; validating each allowlisted event against the schema before queuing closes that for every field the schema constrains by type, enum, format, or pattern. Free-text fields the schema leaves unconstrained (branch, model, and the like) are covered only by the allowlist and adapter tests.
+
+This allowlist governs only what leaves the agent. A harness's own telemetry reaches Neo.Tax without passing through the agent, so the OTLP endpoint holds a separate allowlist on the server (`otlp-ingest`).
 
 Generating the statement from code is what lets the answer to a security questionnaire be "this table, and the test that proves it" rather than a document someone remembers to update.
 
