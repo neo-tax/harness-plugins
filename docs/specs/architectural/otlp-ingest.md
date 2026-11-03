@@ -44,15 +44,15 @@ Governs Neo.Tax's second entry point into the session record: an OpenTelemetry (
 - `server-allowlist`(approved): Of each record the endpoint keeps only the attributes its source's mapping names: model, token counts, estimated cost, event timestamp, session id, request id, user email, and repo; no other attribute, resource attribute, or record body is stored.
 - `content-never-stored`(approved): Prompt text, response text, tool inputs and outputs, commands, file paths, and API bodies are dropped even when the sending harness is configured to export them.
 - `allowlist-before-write`(approved): The allowlist is applied before any part of a record is written to storage or to a log line.
-- `engineer-from-user-email`(approved): A telemetry turn's engineer is its `user.email`, resolved to a contributor the same way a device's confirmed email is; a turn without `user.email` is stored with no engineer.
+- `engineer-from-user-email`(approved): A telemetry-only turn's engineer is its `user.email`, resolved to a contributor the same way a device's confirmed email is; a turn without `user.email` is stored with no engineer.
 - `estimated-cost-labeled`(approved): A telemetry turn's cost is stored as the harness's own estimate, distinct from list-price, billed, or invoiced cost.
 - `telemetry-turn-idempotent`(approved): Two telemetry turns in one organization with the same request id are one turn, so a re-exported record adds nothing.
 - `telemetry-turn-without-request-id`(draft): A telemetry turn without a `request_id` is keyed by its session id, timestamp, and model, and never joins a plugin turn.
 - `join-on-request-id`(approved): A plugin `session.turn` and a telemetry turn in the same organization with the same non-null request id are one turn, counted once.
 - `one-turn-per-request-id`(draft): Plugin turns in one organization that share a request id are one turn: the first stored keeps its session, and later ones are counted as duplicates.
 - `join-order-independent`(approved): A joined turn is the same whichever of its two paths arrives first.
-- `telemetry-wins-usage`(approved): A joined turn takes its model, token counts, and cost from telemetry.
-- `plugin-wins-context`(approved): A joined turn takes its session, branch, head SHA, and subagent id from the plugin, and telemetry never sets them.
+- `telemetry-wins-usage`(approved): A joined turn takes its token counts and cost from telemetry, and its model from telemetry when telemetry carries one, else from the plugin.
+- `plugin-wins-context`(approved): A joined turn takes its session, engineer, branch, head SHA, and subagent id from the plugin, its engineer being the one its device resolves to, and telemetry never sets them.
 - `pr-opened-plugin-only`(approved): A session's pull requests opened come only from the plugin's `session.pr_opened` events.
 - `single-path-turn-kept`(approved): A turn that arrives through only one path is stored as it arrived: a telemetry-only turn has no branch, and a plugin-only turn keeps its transcript usage.
 - `side-usage-yields-to-telemetry`(draft): A session with at least one plugin turn, every one of which joined a telemetry turn, does not add its plugin `side_usage` to its usage, because telemetry reports those side calls as turns of their own; any other session adds it.
