@@ -52,7 +52,8 @@ Governs Neo.Tax's second entry point into the session record: an OpenTelemetry (
 - `one-turn-per-request-id`(draft): Plugin turns in one organization that share a request id are one turn: the first stored keeps its session, and later ones are counted as duplicates.
 - `join-order-independent`(approved): A joined turn is the same whichever of its two paths arrives first.
 - `telemetry-wins-usage`(approved): A joined turn takes its token counts and cost from telemetry, and its model from telemetry when telemetry carries one, else from the plugin.
-- `plugin-wins-context`(approved): A joined turn takes its session, engineer, branch, head SHA, and subagent id from the plugin, its engineer being the one its device resolves to, and telemetry never sets them.
+- `plugin-wins-context`(approved): A joined turn takes its session, engineer, timestamp, repo, branch, head SHA, and subagent id from the plugin, its engineer being the one its device resolves to, and telemetry never sets them.
+- `plugin-wins-otherwise`(approved): Any field of a joined turn that both paths carry and no other requirement assigns comes from the plugin.
 - `pr-opened-plugin-only`(approved): A session's pull requests opened come only from the plugin's `session.pr_opened` events.
 - `single-path-turn-kept`(approved): A turn that arrives through only one path is stored as it arrived: a telemetry-only turn has no branch, and a plugin-only turn keeps its transcript usage.
 - `side-usage-yields-to-telemetry`(draft): A session with at least one plugin turn, every one of which joined a telemetry turn, does not add its plugin `side_usage` to its usage, because telemetry reports those side calls as turns of their own; any other session adds it.
