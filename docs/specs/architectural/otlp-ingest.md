@@ -20,7 +20,7 @@ Governs Neo.Tax's second entry point into the session record: an OpenTelemetry (
 - `json-only`(approved): An authenticated request whose content type is not `application/json` is answered 415 without its body being read.
 - `authenticate-first`(approved): The ingest key is checked before the content type or the body, so a request with a bad key is answered 401 whatever else is wrong with it.
 - `malformed-request-refused`(approved): A body that is not an OTLP log export request is answered 400 and nothing in it is stored.
-- `partial-success`(approved): A request in which some records are rejected is answered 200 with OTLP's `partial_success`, carrying the number of rejected records and a message naming why the first was rejected; the request's other records are stored.
+- `partial-success`(approved): A request in which some records are rejected is answered 200 with OTLP/JSON's `partialSuccess`, carrying `rejectedLogRecords` and an `errorMessage` naming why the first was rejected; the request's other records are stored.
 - `ingest-key-bearer`(approved): A request authenticates with an ingest key sent as a bearer token in the `Authorization` header, so an exporter can carry it as a static header.
 - `ingest-key-refusal`(approved): A missing, unknown, or revoked ingest key is answered 401 with the same body for each, and nothing in the request is stored.
 - `ingest-key-organization`(approved): An ingest key belongs to exactly one organization, and every record accepted under it is stored in that organization.
@@ -72,7 +72,7 @@ The request id is the join key because both paths carry the vendor's own id for 
 
 Telemetry reports every API call, including the side calls (session title, recap, compaction summary) that the plugin can see only as session totals on `session.closed`. Adding both would count side calls twice, so when telemetry covered every turn the plugin saw, the plugin's `side_usage` stops contributing to that session's usage.
 
-The endpoint answers rejected records through OTLP's own `partial_success` rather than a Neo.Tax shape, so an unmodified exporter handles the response correctly. OTLP's response carries a count and one message, not a per-record index the way the plugin's ingest response does.
+The endpoint answers rejected records through OTLP's own `partialSuccess` rather than a Neo.Tax shape, so an unmodified exporter handles the response correctly. OTLP's response carries a count and one message, not a per-record index the way the plugin's ingest response does.
 
 ## Alternatives Considered
 
@@ -85,7 +85,7 @@ The endpoint answers rejected records through OTLP's own `partial_success` rathe
 
 ## Risks
 
-- **A source renames an attribute.** Its turns lose usage or are rejected without the exporter noticing. Mitigated by `partial_success` counts and a rejected-record rate watched per source.
+- **A source renames an attribute.** Its turns lose usage or are rejected without the exporter noticing. Mitigated by `partialSuccess` counts and a rejected-record rate watched per source.
 - **The ingest key leaks from a managed machine.** Anyone holding it can write false telemetry into that organization. Accepted for a write-only key; revoke and remint for that destination.
 - **The plugin and telemetry disagree on a joined turn's usage.** Telemetry's counts are taken silently. Accepted; the difference between the two is itself a measure of the transcript parser's accuracy.
 - **Telemetry covers only part of a session.** An exporter turned on mid-session, or records lost in transit, leave some turns plugin-only, so that session adds the plugin's whole `side_usage` on top of the side calls telemetry did report. Accepted as a small overcount on partly covered sessions, which the rate of plugin-only turns per session makes visible.
