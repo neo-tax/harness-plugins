@@ -40,8 +40,6 @@ The plugin's ingest endpoint is one of Neo.Tax's two entry points into the sessi
 - `side-usage-shape`(tested): `side_usage` is null when the harness recorded no session totals, or when they cannot be matched to the session's turns, else an array with at most one entry per model, each carrying `model` and the non-negative integer counts `input`, `output`, `cache_write_5m`, `cache_write_1h`, and `cache_read`.
 - `side-usage-cumulative`(approved): `side_usage` covers the whole session up to that close, so the server takes it from the session's `session.closed` with the latest `ended_at` whose `side_usage` is not null, and never adds two closes' `side_usage` together.
 - `repo-shape`(tested): `repo` is either null or an object of `host`, `owner`, and `name`, each lowercase.
-- `request-id-is-vendor-id`(built): A turn's `request_id` is the vendor's API request id exactly as the harness recorded it, and is null when the harness recorded none.
-  - status-reason: the Claude Code transcript parser copies the transcript's `requestId` unchanged; no test is tagged with this requirement
 - `subagent-turns-belong-to-parent`(tested): A turn produced by a subagent carries the parent session's `session_id` and a non-null `subagent_id`; a main-thread turn carries a null `subagent_id`.
 - `idempotency-key`(built): The server treats two events with the same `device_id`, `session_id`, `event_kind`, and `message_id` as the same event; for `session.pr_opened` the key adds `repo` and `number`; for `session.closed` it adds `ended_at`, so a resumed session's later close is kept; for `session.opened`, without a `message_id`, the key uses the event kind alone within the session.
   - status-reason: unmerged: built in platform-new #5601, which is still open, and tested there in projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts
@@ -71,7 +69,7 @@ The contract carries one event per assistant message rather than a cumulative pe
 
 `email_confirmed_by` is in the enrollment request from the first version even though v0.1 only ever sends `engineer`, so managed enrollment in v1.0 adds no server-side change.
 
-Harness-specific identifiers (`session_id`, `message_id`, `request_id`, `subagent_id`) are passed through as the harness produced them; the contract does not normalize them beyond requiring strings. The request id is held to that most strictly, because it is the one identifier a harness's own telemetry also carries: the server joins a turn from this contract with the telemetry record for the same API call on it, so a normalized or synthesized value would split one turn into two.
+Harness-specific identifiers (`session_id`, `message_id`, `request_id`, `subagent_id`) are passed through as the harness produced them; the contract does not normalize them beyond requiring strings. The request id is held to that most strictly (`claude-code-transcript-parser#request-id-from-transcript`), because it is the one identifier a harness's own telemetry also carries: the server joins a turn from this contract with the telemetry record for the same API call on it, so a normalized or synthesized value would split one turn into two.
 
 ## Risks
 
