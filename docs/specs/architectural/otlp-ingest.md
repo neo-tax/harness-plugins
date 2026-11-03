@@ -36,7 +36,8 @@ Governs Neo.Tax's second entry point into the session record: an OpenTelemetry (
 - `claude-code-unsplit-cache-write`(draft): A Claude Code turn without the split cache write attributes counts `cache_creation_tokens` as five-minute cache writes.
 - `claude-code-repo-mapping`(approved): A Claude Code turn's repo is the host of `vcs.repository.url.full` with `vcs.owner.name` and `vcs.repository.name`, each lowercase, in the same shape as the wire contract's `repo`, and is null when those attributes are absent.
 - `numeric-attribute-encodings`(approved): A token count is read from an `intValue` or from a `stringValue` holding a base-10 integer, and a cost from a `doubleValue`, an `intValue`, or a `stringValue` holding a decimal number.
-- `claude-code-record-rejected`(approved): A `claude_code.api_request` record without a `session.id`, or with a token count that is not a non-negative integer, is rejected.
+- `claude-code-record-rejected`(approved): A `claude_code.api_request` record without a `session.id`, missing `input_tokens`, `output_tokens`, or `cache_read_tokens`, or with a token count that is not a non-negative integer, is rejected.
+- `claude-code-cost-optional`(approved): A `claude_code.api_request` record whose `cost_usd` is missing or unreadable is stored with a null cost rather than rejected, because its usage is still exact.
 - `server-allowlist`(approved): Of each record the endpoint keeps only the attributes its source's mapping names: model, token counts, estimated cost, event timestamp, session id, request id, user email, and repo; no other attribute, resource attribute, or record body is stored.
 - `content-never-stored`(approved): Prompt text, response text, tool inputs and outputs, commands, file paths, and API bodies are dropped even when the sending harness is configured to export them.
 - `allowlist-before-write`(approved): The allowlist is applied before any part of a record is written to storage or to a log line.
