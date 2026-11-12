@@ -500,3 +500,38 @@ func TestRequestLevelSchemaRejectionBacksOff(t *testing.T) {
 		t.Fatal("events moved")
 	}
 }
+
+type fixedResponse struct{ resp contract.IngestResponse }
+
+func (f *fixedResponse) Send(context.Context, []json.RawMessage) (contract.IngestResponse, error) {
+	return f.resp, nil
+}
+
+// A response whose counts add up but whose rejection indexes are out of range
+// or repeated cannot say which events the server rejected, so it is treated
+// as malformed: nothing is dead-lettered or advanced, and the flush backs off.
+// @spec: event-queue-and-backfill#schema-rejection-dead-letters
+// @spec: event-queue-and-backfill#segment-advances-on-success
+func TestMalformedRejectionIndexesBackOff(t *testing.T) {
+	cases := map[string]contract.IngestResponse{
+		"out of range": {Accepted: 2, Rejected: []contract.Rejection{{Index: 5, Reason: "r"}}},
+		"negative":     {Accepted: 2, Rejected: []contract.Rejection{{Index: -1, Reason: "r"}}},
+		"duplicate":    {Accepted: 1, Rejected: []contract.Rejection{{Index: 1, Reason: "r"}, {Index: 1, Reason: "r"}}},
+	}
+	for name, resp := range cases {
+		t.Run(name, func(t *testing.T) {
+			e := setup(t)
+			e.appendN("a", 3)
+			res, err := e.q.Flush(context.Background(), &fixedResponse{resp: resp})
+			if err != nil || !res.Failed || res.Sent != 0 || res.DeadLettered != 0 {
+				t.Fatalf("%+v %v", res, err)
+			}
+			if lineCount(t, e.files("queue", "*.jsonl")) != 3 || len(e.files("deadletter", "*")) != 0 {
+				t.Fatal("events moved")
+			}
+			if !e.q.State().NextAttemptAt.After(e.clock.t) {
+				t.Fatal("no backoff recorded")
+			}
+		})
+	}
+}

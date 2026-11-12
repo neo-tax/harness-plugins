@@ -359,12 +359,9 @@ func (q *Queue) Flush(ctx context.Context, s Sender) (FlushResult, error) {
 		resp, err := s.Send(ctx, raws)
 		var se *ingest.StatusError
 		switch {
-		case err == nil && resp.Accepted+resp.Duplicates+len(resp.Rejected) == len(batch):
+		case err == nil && accountsFor(resp, len(batch)):
 			// @spec: event-queue-and-backfill#schema-rejection-dead-letters
 			for _, r := range resp.Rejected {
-				if r.Index < 0 || r.Index >= len(batch) {
-					continue
-				}
 				if err := q.deadLetter(batch[r.Index].raw, r.Reason); err != nil {
 					return res, err
 				}
@@ -384,7 +381,9 @@ func (q *Queue) Flush(ctx context.Context, s Sender) (FlushResult, error) {
 		default:
 			// A request-level 422 is grouped here too: individual events are
 			// rejected in the response body, so a whole-request rejection is
-			// systemic and would recur for every batch.
+			// systemic and would recur for every batch. A 2xx response that
+			// does not account for every event exactly once is grouped here
+			// too: advancing on it could lose an event the server rejected.
 			// @spec: event-queue-and-backfill#server-and-network-errors-back-off
 			res.Failed = true
 			return res, q.backOff()
@@ -397,6 +396,22 @@ func (q *Queue) Flush(ctx context.Context, s Sender) (FlushResult, error) {
 		}
 	}
 	return res, nil
+}
+
+// accountsFor reports whether resp accounts for each of n sent events exactly
+// once: the counts add up and every rejection names a distinct in-range index.
+func accountsFor(resp contract.IngestResponse, n int) bool {
+	if resp.Accepted+resp.Duplicates+len(resp.Rejected) != n {
+		return false
+	}
+	seen := make(map[int]bool, len(resp.Rejected))
+	for _, r := range resp.Rejected {
+		if r.Index < 0 || r.Index >= n || seen[r.Index] {
+			return false
+		}
+		seen[r.Index] = true
+	}
+	return true
 }
 
 func (q *Queue) backOff() error {
