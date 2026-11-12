@@ -103,6 +103,8 @@ v0.1 takes Claude Code's own export, sent directly by managed settings: logs and
 - `fake-ingest-accepts-otlp`(tested): The fake ingest server accepts OTLP/JSON log and metric export requests at `/otlp/v1/logs` and `/otlp/v1/metrics`, under any ingest key it was started with (any key when none was given) and never under a device key, with `authenticate-first`, `json-accepted`, `gzip-accepted`, and `malformed-request-refused`, and records every log record and metric data point unfiltered, so the plugin and a harness's own telemetry can run end to end against one local server.
 - `dev-stack-exports-telemetry`(built): The local dev stack runs Claude Code with its telemetry exporting logs and metrics as OTLP/JSON to the fake ingest server, beside the plugin.
   - status-reason: `scripts/dev.sh claude` sets the exporter environment; exercised by hand against a real Claude Code, which no automated test runs
+- `dev-stack-capture`(built): `scripts/dev.sh capture` runs a new session, a resume, a fork, and an interactive `/clear` through the dev stack, and fails unless the plugin and telemetry agree on every session id, a fork re-sends none of its parent's turns, and every plugin turn has a telemetry call with its request id.
+  - status-reason: it drives a real, logged-in Claude Code, which CI does not have; run it by hand against each new Claude Code version
 
 ## Requirements (v1.0)
 

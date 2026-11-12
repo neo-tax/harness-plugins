@@ -16,12 +16,15 @@
 #   scripts/dev.sh events [-f]        Show the events the fake server accepted.
 #   scripts/dev.sh otlp [-f]          Show the telemetry Claude Code exported
 #       to the fake server's OTLP endpoints (NEO_TAX_DEV_OTLP=0 turns it off).
+#   scripts/dev.sh capture            Run a new session, a resume, a fork, and
+#       an interactive /clear, and check the plugin and telemetry agree on
+#       each session and request id. Needs expect; costs a few cheap prompts.
 #   scripts/dev.sh audit              Compare the proxy's usage to the events.
 #   scripts/dev.sh status
 #   scripts/dev.sh down [--clean]     Stop the servers and uninstall the
 #       plugin; --clean also deletes .dev (and the throwaway Claude login).
 #
-# Needs go, jq, curl, and claude. Ports: NEO_TAX_DEV_PORT (8787) and
+# Needs go, jq, curl, and claude (and expect, for capture). Ports: NEO_TAX_DEV_PORT (8787) and
 # NEO_TAX_AUDIT_PORT (8788).
 set -eu
 
@@ -171,6 +174,11 @@ run_claude() {
   export NEO_TAX_AGENT_BIN="$dev/bin/neo-tax-agent" NEO_TAX_SERVER="http://127.0.0.1:$port"
   c=$(config_dir)
   [ -n "$c" ] && export CLAUDE_CONFIG_DIR="$c"
+  # Run from inside another Claude Code session, Claude Code would inherit
+  # that session's identity and stop saving transcripts, so the plugin would
+  # see no turns.
+  unset CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ID CLAUDE_CODE_SESSION_ATTENDED \
+    CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH
   if running usage-audit; then
     export ANTHROPIC_BASE_URL="http://127.0.0.1:$audit_port"
   fi
@@ -207,6 +215,94 @@ events() {
     echo
     jq -s -r 'group_by(.event_kind) | map("\(.[0].event_kind): \(length)") | .[]' "$f"
   fi
+}
+
+# capture runs Claude Code through the dev stack in the ways that change a
+# session's id, then checks both paths against what it saw.
+# @spec: otlp-ingest#dev-stack-capture
+capture() {
+  need expect
+  running fake-ingest || die "the fake ingest server is not running; run scripts/dev.sh up"
+  [ "${NEO_TAX_DEV_OTLP:-1}" != 0 ] || die "capture needs telemetry; unset NEO_TAX_DEV_OTLP"
+  conf=$(config_dir)
+  [ -n "$conf" ] || die "capture runs only against the throwaway config, not --my-config"
+  work="$dev/capture"
+  mkdir -p "$work"
+  [ -d "$work/.git" ] || git -C "$work" init -q
+  work=$(cd "$work" && pwd -P)
+  # Trust the capture folder up front: answering the trust prompt with keys
+  # is unreliable while the interface is still probing the terminal.
+  [ -f "$conf/.claude.json" ] || echo '{}' >"$conf/.claude.json"
+  jq --arg w "$work" '.projects[$w].hasTrustDialogAccepted = true' "$conf/.claude.json" >"$conf/.claude.json.tmp" \
+    && mv "$conf/.claude.json.tmp" "$conf/.claude.json"
+  touch "$dev/events.jsonl" "$dev/otlp.jsonl"
+  ev_from=$(($(wc -l <"$dev/events.jsonl") + 1))
+  ot_from=$(($(wc -l <"$dev/otlp.jsonl") + 1))
+  self="$repo/scripts/dev.sh"
+
+  sid() { jq -r .session_id; }
+  echo "capture: new session"
+  a=$(cd "$work" && "$self" claude -p "Reply with just the word one." --output-format json </dev/null | sid)
+  echo "capture: resume"
+  r=$(cd "$work" && "$self" claude -p "Reply with just the word two." --resume "$a" --output-format json </dev/null | sid)
+  echo "capture: fork"
+  f=$(cd "$work" && "$self" claude -p "Reply with just the word three." --resume "$a" --fork-session --output-format json </dev/null | sid)
+
+  echo "capture: interactive /clear"
+  cat >"$dev/capture.exp" <<EXP
+set timeout 60
+log_file -noappend {$dev/capture.log}
+cd {$work}
+spawn sh {$self} claude
+# The interface draws spaces as cursor moves, so patterns match single words.
+sleep 8
+proc ask {text} {
+  sleep 3
+  send -- \$text
+  sleep 1
+  send "\\r"
+  expect -re {done} {} timeout {}
+}
+ask "Reply with just the word four."
+ask "/clear"
+ask "Reply with just the word five."
+sleep 3
+send -- "/exit"
+sleep 1
+send "\\r"
+expect eof
+EXP
+  expect "$dev/capture.exp" >/dev/null 2>&1 || die "the interactive session failed; see $dev/capture.log"
+
+  echo "capture: waiting for hooks and telemetry to flush"
+  sleep 10
+  tail -n +"$ev_from" "$dev/events.jsonl" >"$work/events.jsonl"
+  tail -n +"$ot_from" "$dev/otlp.jsonl" >"$work/otlp.jsonl"
+  jq -n -r --arg a "$a" --arg r "$r" --arg f "$f" --arg work "$work" \
+    --slurpfile ev "$work/events.jsonl" --slurpfile ot "$work/otlp.jsonl" '
+    def p(s): $ev | map(select(.session_id == s));
+    def calls(s): $ot | map(select(.attributes["event.name"] == "api_request" and .attributes["session.id"] == s));
+    def turnreqs(s): p(s) | map(select(.event_kind == "session.turn") | .request_id);
+    ($ev | map(select(.event_kind == "session.closed" and .reason == "clear")) | .[0].session_id) as $c
+    | ($ev | map(select(.event_kind == "session.opened" and .source == "clear")) | .[0].session_id) as $d
+    | ($ot | map(.attributes.request_id // empty)) as $otreqs
+    | ($ev | map(select(.event_kind == "session.turn") | .request_id)) as $turns
+    | [
+        ["new session reaches both paths", ($a != "" and (p($a) | length) > 0 and (calls($a) | length) > 0)],
+        ["resume keeps the session id", ($r == $a)],
+        ["fork gets a new id on both paths", ($f != $a and (p($f) | length) > 0 and (calls($f) | length) > 0)],
+        ["fork re-sends none of its parent turns", ((turnreqs($f) - turnreqs($a)) == turnreqs($f))],
+        ["/clear closes one session and opens another", ($c != null and $d != null and $c != $d)],
+        ["telemetry switches at /clear too", ($c != null and $d != null and (calls($c) | length) > 0 and (calls($d) | length) > 0)],
+        ["every plugin turn has a telemetry call", (($turns | length) > 0 and ($turns - $otreqs) == [])]
+      ] as $checks
+    | ($checks[] | "\(if .[1] then "PASS" else "FAIL" end)  \(.[0])"),
+      "",
+      "sessions: new \($a[0:8])  fork \($f[0:8])  before /clear \(($c // "-")[0:8])  after /clear \(($d // "-")[0:8])",
+      "plugin turns: \($turns | length)  telemetry calls: \($ot | map(select(.attributes["event.name"] == "api_request")) | length)",
+      (if all($checks[]; .[1]) then "capture: ok" else "capture: FAILED; inputs in \($work)" end)
+    ' | tee "$work/report.txt"
+  grep -q '^capture: ok' "$work/report.txt"
 }
 
 audit() {
@@ -254,7 +350,8 @@ case "$cmd" in
   events) events "$@" ;;
   otlp) otlp "$@" ;;
   audit) audit "$@" ;;
+  capture) capture ;;
   status) status ;;
   down) down "$@" ;;
-  *) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
