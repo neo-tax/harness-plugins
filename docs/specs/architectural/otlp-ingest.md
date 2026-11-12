@@ -8,6 +8,9 @@ updated: 2026-11-13
 version: 8
 affects:
   - deploy/claude-code/*
+  - internal/fakeingest/otlp*.go
+  - cmd/fake-ingest/*.go
+  - scripts/dev.sh
 ---
 
 # OTLP ingest
@@ -95,6 +98,11 @@ v0.1 takes Claude Code's own export, sent directly by managed settings: logs and
 - `delta-accepted`(approved): A claimed metric is accepted as a monotonic sum in delta temporality. A claimed metric of any other type or temporality is rejected.
 - `metric-point-idempotent`(approved): A re-exported delta data point adds nothing: it is keyed by its series, start time, and end time.
 - `claude-code-metrics-fixture`(approved): The Claude Code metric mapping is specified by a fixture: a captured Claude Code OTLP/JSON metric export in delta temporality, paired with the session totals it must produce, and from v1.0 the same export in cumulative temporality.
+### Local testing
+
+- `fake-ingest-accepts-otlp`(tested): The fake ingest server accepts OTLP/JSON log and metric export requests at `/otlp/v1/logs` and `/otlp/v1/metrics`, under any ingest key it was started with (any key when none was given) and never under a device key, with `authenticate-first`, `json-accepted`, `gzip-accepted`, and `malformed-request-refused`, and records every log record and metric data point unfiltered, so the plugin and a harness's own telemetry can run end to end against one local server.
+- `dev-stack-exports-telemetry`(built): The local dev stack runs Claude Code with its telemetry exporting logs and metrics as OTLP/JSON to the fake ingest server, beside the plugin.
+  - status-reason: `scripts/dev.sh claude` sets the exporter environment; exercised by hand against a real Claude Code, which no automated test runs
 
 ## Requirements (v1.0)
 

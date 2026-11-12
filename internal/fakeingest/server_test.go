@@ -296,3 +296,20 @@ func TestTwoPROpenedInOneSessionAreDistinct(t *testing.T) {
 		t.Fatalf("%+v", ir)
 	}
 }
+
+// A resumed session closes once per process; each close is kept, and a
+// redelivered close is a duplicate.
+// @spec: session-event-wire-contract#idempotency-key
+func TestResumedSessionCloseIsKept(t *testing.T) {
+	h := start(t, fakeingest.Options{})
+	er := h.enroll()
+	env := turn(er.DeviceID, "x").Envelope
+	closed := func(at time.Time) contract.Closed {
+		return contract.NewClosed(env, contract.ClosedFields{EndedAt: at})
+	}
+	first, later := env.SentAt, env.SentAt.Add(time.Hour)
+	_, ir, body := h.ingest(er.DeviceKey, closed(first), closed(later), closed(first))
+	if ir.Accepted != 2 || ir.Duplicates != 1 {
+		t.Fatalf("%+v %s", ir, body)
+	}
+}

@@ -14,6 +14,8 @@
 #       API returns for every request, for `audit`.
 #   scripts/dev.sh claude [args...]   Run Claude Code wired to the stack.
 #   scripts/dev.sh events [-f]        Show the events the fake server accepted.
+#   scripts/dev.sh otlp [-f]          Show the telemetry Claude Code exported
+#       to the fake server's OTLP endpoints (NEO_TAX_DEV_OTLP=0 turns it off).
 #   scripts/dev.sh audit              Compare the proxy's usage to the events.
 #   scripts/dev.sh status
 #   scripts/dev.sh down [--clean]     Stop the servers and uninstall the
@@ -111,7 +113,7 @@ up() {
 
   if ! running fake-ingest; then
     port_free "$port" NEO_TAX_DEV_PORT
-    "$dev/bin/fake-ingest" -addr "127.0.0.1:$port" -record "$dev/events.jsonl" >"$dev/fake-ingest.log" 2>&1 &
+    "$dev/bin/fake-ingest" -addr "127.0.0.1:$port" -record "$dev/events.jsonl" -record-otlp "$dev/otlp.jsonl" -ingest-key dev-ingest >"$dev/fake-ingest.log" 2>&1 &
     echo $! >"$dev/fake-ingest.pid"
     if ! wait_http "http://127.0.0.1:$port/_fake/events" || ! running fake-ingest; then
       die "fake ingest did not start; see $dev/fake-ingest.log"
@@ -172,7 +174,26 @@ run_claude() {
   if running usage-audit; then
     export ANTHROPIC_BASE_URL="http://127.0.0.1:$audit_port"
   fi
+  # Claude Code's own telemetry, to the fake server's OTLP endpoints.
+  # @spec: otlp-ingest#dev-stack-exports-telemetry
+  if [ "${NEO_TAX_DEV_OTLP:-1}" != 0 ]; then
+    export CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_LOGS_EXPORTER=otlp OTEL_METRICS_EXPORTER=otlp \
+      OTEL_EXPORTER_OTLP_PROTOCOL=http/json OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:$port/otlp" \
+      OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer dev-ingest" \
+      OTEL_LOGS_EXPORT_INTERVAL=1000 OTEL_METRIC_EXPORT_INTERVAL=5000
+  fi
   exec claude "$@"
+}
+
+otlp() {
+  f="$dev/otlp.jsonl"
+  [ -f "$f" ] || die "no telemetry yet"
+  summary='[.signal, (.event_name // .name), (.attributes["session.id"] // "-"), (if .signal == "metric" then (.value | tostring) else (.attributes.request_id // "") end)] | @tsv'
+  if [ "${1:-}" = -f ]; then
+    tail -n +1 -f "$f" | jq -r --unbuffered "$summary"
+  else
+    jq -r "$summary" "$f"
+  fi
 }
 
 events() {
@@ -231,8 +252,9 @@ case "$cmd" in
   up) up "$@" ;;
   claude) run_claude "$@" ;;
   events) events "$@" ;;
+  otlp) otlp "$@" ;;
   audit) audit "$@" ;;
   status) status ;;
   down) down "$@" ;;
-  *) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

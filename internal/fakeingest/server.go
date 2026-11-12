@@ -1,4 +1,4 @@
-// Package fakeingest is a stand-in for Neo.Tax's enrollment and ingest
+// Package fakeingest is a stand-in for Neo.Tax's enrollment, ingest, and OTLP
 // endpoints. It validates every request against the schema documents in this
 // repository's contract package and records what it accepts, so tests,
 // dogfooding, and security reviewers can see exactly what the agent sends.
@@ -33,6 +33,12 @@ type Options struct {
 	StallFor time.Duration
 	// Record, when set, receives one JSON line per accepted event.
 	Record io.Writer
+	// IngestKeys, when non-empty, is the set of keys the OTLP endpoints
+	// accept. When empty, any key that is not a device key is accepted.
+	IngestKeys []string
+	// RecordOTLP, when set, receives one JSON line per OTLP log record or
+	// metric data point received.
+	RecordOTLP io.Writer
 }
 
 // Fault modes the server can be instructed to return.
@@ -62,13 +68,14 @@ type Server struct {
 	opts Options
 	mux  *http.ServeMux
 
-	mu        sync.Mutex
-	devices   []*device
-	byKey     map[string]*device
-	seen      map[string]bool
-	events    []json.RawMessage
-	fault     string
-	faultLeft int
+	mu          sync.Mutex
+	devices     []*device
+	byKey       map[string]*device
+	seen        map[string]bool
+	events      []json.RawMessage
+	otlpRecords []json.RawMessage
+	fault       string
+	faultLeft   int
 }
 
 // New returns a fake ingest server.
@@ -79,6 +86,10 @@ func New(opts Options) *Server {
 	s := &Server{opts: opts, mux: http.NewServeMux(), byKey: map[string]*device{}, seen: map[string]bool{}}
 	s.mux.HandleFunc("POST /v1/enroll", s.enroll)
 	s.mux.HandleFunc("POST /v1/events", s.ingest)
+	s.mux.HandleFunc("POST /otlp/v1/logs", s.otlp(signalLogs))
+	s.mux.HandleFunc("POST /otlp/v1/metrics", s.otlp(signalMetrics))
+	s.mux.HandleFunc("GET /_fake/otlp", s.listOTLP)
+	s.mux.HandleFunc("DELETE /_fake/otlp", s.resetOTLP)
 	s.mux.HandleFunc("GET /_fake/events", s.listEvents)
 	s.mux.HandleFunc("DELETE /_fake/events", s.resetEvents)
 	s.mux.HandleFunc("GET /_fake/enrollments", s.listEnrollments)
@@ -193,6 +204,10 @@ func idempotencyKey(ev map[string]any) string {
 	if ev["event_kind"] == contract.KindPROpened {
 		repo, _ := json.Marshal(ev["repo"])
 		key += "\x00" + string(repo) + "\x00" + fmt.Sprint(ev["number"])
+	}
+	if ev["event_kind"] == contract.KindClosed {
+		// A resumed session closes again; its later close is kept.
+		key += "\x00" + fmt.Sprint(ev["ended_at"])
 	}
 	return key
 }
