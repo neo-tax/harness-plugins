@@ -34,18 +34,52 @@ func TestStatementListsEveryFieldPerKind(t *testing.T) {
 			section = section[:j]
 		}
 		fields, _ := allowlist.For(kind)
-		for _, f := range fields {
-			row := "| `" + f.Name + "` | " + f.Description + " |"
-			if !strings.Contains(section, row) {
-				t.Errorf("%s: missing row %q", kind, row)
-			}
-			for _, c := range f.Children {
-				row := "| `" + f.Name + "." + c.Name + "` | " + c.Description + " |"
-				if !strings.Contains(section, row) {
-					t.Errorf("%s: missing row %q", kind, row)
-				}
-			}
+		for _, row := range missingRows(section, "", fields) {
+			t.Errorf("%s: missing row %q", kind, row)
 		}
+	}
+}
+
+// missingRows returns the row for every field in fields, at any depth, that
+// section lacks. Each row names the field by its full dotted path.
+func missingRows(section, prefix string, fields []allowlist.Field) []string {
+	var out []string
+	for _, f := range fields {
+		row := "| `" + prefix + f.Name + "` | " + f.Description + " |"
+		if !strings.Contains(section, row) {
+			out = append(out, row)
+		}
+		out = append(out, missingRows(section, prefix+f.Name+".", f.Children)...)
+	}
+	return out
+}
+
+// A field nested two levels deep is still let through by Apply, so the
+// statement must list it under its full dotted path, and the per-kind check
+// must notice when it does not.
+//
+// @spec: field-allowlist#statement-per-event-kind
+func TestStatementListsNestedFieldsAtAnyDepth(t *testing.T) {
+	fields := []allowlist.Field{
+		{Name: "usage", Description: "Token counts.", Children: []allowlist.Field{
+			{Name: "input_tokens", Description: "Input tokens."},
+			{Name: "cache", Description: "Cache counts.", Children: []allowlist.Field{
+				{Name: "read_tokens", Description: "Tokens read from cache."},
+			}},
+		}},
+	}
+	rows := allowlist.Rows(fields)
+	want := "| `usage.cache.read_tokens` | Tokens read from cache. |"
+	if !strings.Contains(rows, want) {
+		t.Errorf("rows lack %q:\n%s", want, rows)
+	}
+	if missing := missingRows(rows, "", fields); len(missing) > 0 {
+		t.Errorf("missing rows %v", missing)
+	}
+
+	oneLevel := "| `usage` | Token counts. |\n| `usage.input_tokens` | Input tokens. |\n| `usage.cache` | Cache counts. |\n"
+	if missing := missingRows(oneLevel, "", fields); len(missing) != 1 || missing[0] != want {
+		t.Errorf("one-level rendering: missing %v, want only %q", missing, want)
 	}
 }
 

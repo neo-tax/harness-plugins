@@ -39,20 +39,30 @@ func TestAllowlistMatchesContract(t *testing.T) {
 			if f.Description == "" {
 				t.Errorf("%s.%s has no description", kind, f.Name)
 			}
-			if (len(f.Children) > 0) != (contract.ObjectFields(kind, f.Name) != nil) {
-				t.Errorf("%s.%s: allowlist children %v, schema object fields %v", kind, f.Name, names(f.Children), contract.ObjectFields(kind, f.Name))
-			}
-			if len(f.Children) > 0 {
-				if got, want := names(f.Children), contract.ObjectFields(kind, f.Name); !reflect.DeepEqual(got, want) {
-					t.Errorf("%s.%s children:\n allowlist %v\n contract  %v", kind, f.Name, got, want)
-				}
-				for _, c := range f.Children {
-					if c.Description == "" {
-						t.Errorf("%s.%s.%s has no description", kind, f.Name, c.Name)
-					}
-				}
-			}
+			checkChildren(t, kind, f.Name, f)
 		}
+	}
+}
+
+// checkChildren compares f's Children with the object the contract permits at
+// path, then recurses, so nesting at any depth stays in step with the schema.
+func checkChildren(t *testing.T, kind, path string, f allowlist.Field) {
+	t.Helper()
+	want := contract.ObjectFields(kind, path)
+	if (len(f.Children) > 0) != (want != nil) {
+		t.Errorf("%s.%s: allowlist children %v, schema object fields %v", kind, path, names(f.Children), want)
+	}
+	if len(f.Children) == 0 {
+		return
+	}
+	if got := names(f.Children); !reflect.DeepEqual(got, want) {
+		t.Errorf("%s.%s children:\n allowlist %v\n contract  %v", kind, path, got, want)
+	}
+	for _, c := range f.Children {
+		if c.Description == "" {
+			t.Errorf("%s.%s.%s has no description", kind, path, c.Name)
+		}
+		checkChildren(t, kind, path+"."+c.Name, c)
 	}
 }
 

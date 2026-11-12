@@ -224,11 +224,13 @@ func SchemaFields() map[string][]string {
 }
 
 // ObjectFields returns the sorted property names of the object the session
-// event schema permits as field on events of kind, following $ref and looking
-// through a nullable oneOf. It returns nil when the field is not an object.
+// event schema permits at path on events of kind, following $ref and looking
+// through a nullable oneOf. path is a field name, or a dotted path such as
+// "usage.cache" for an object nested inside an object field. It returns nil
+// when the path does not name an object.
 //
 // @spec: field-allowlist#allowlist-matches-contract
-func ObjectFields(kind, field string) []string {
+func ObjectFields(kind, path string) []string {
 	b, err := schemaFS.ReadFile(SessionEventSchema)
 	if err != nil {
 		panic(err)
@@ -252,24 +254,35 @@ func ObjectFields(kind, field string) []string {
 		}
 		return n
 	}
-	prop, ok := doc.Properties[field]
+	objectProps := func(n node) map[string]node {
+		n = resolve(n)
+		props := n.Properties
+		for _, alt := range n.OneOf {
+			if alt := resolve(alt); len(alt.Properties) > 0 {
+				props = alt.Properties
+			}
+		}
+		return props
+	}
+	segs := strings.Split(path, ".")
+	prop, ok := doc.Properties[segs[0]]
 	if !ok {
 		for _, alt := range doc.OneOf {
 			def := resolve(alt)
 			if def.Properties["event_kind"].Const == kind {
-				prop, ok = def.Properties[field]
+				prop, ok = def.Properties[segs[0]]
 			}
 		}
 	}
 	if !ok {
 		return nil
 	}
-	prop = resolve(prop)
-	props := prop.Properties
-	for _, alt := range prop.OneOf {
-		if alt := resolve(alt); len(alt.Properties) > 0 {
-			props = alt.Properties
+	props := objectProps(prop)
+	for _, seg := range segs[1:] {
+		if prop, ok = props[seg]; !ok {
+			return nil
 		}
+		props = objectProps(prop)
 	}
 	var out []string
 	for p := range props {

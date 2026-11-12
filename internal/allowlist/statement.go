@@ -33,12 +33,19 @@ Prompt text, completion text, tool inputs, tool outputs, file paths, the working
 	for _, kind := range Kinds() {
 		fields, _ := For(kind)
 		fmt.Fprintf(&b, "\n### `%s`\n\n| Field | Contents |\n| --- | --- |\n", kind)
-		for _, f := range fields {
-			fmt.Fprintf(&b, "| `%s` | %s |\n", f.Name, f.Description)
-			for _, c := range f.Children {
-				fmt.Fprintf(&b, "| `%s.%s` | %s |\n", f.Name, c.Name, c.Description)
-			}
-		}
+		writeRows(&b, "", fields)
 	}
 	return b.String()
+}
+
+// writeRows writes one table row per field, then recurses into its Children
+// under the field's dotted name, so the statement lists every field Apply
+// lets through at any depth.
+//
+// @spec: field-allowlist#statement-per-event-kind
+func writeRows(b *strings.Builder, prefix string, fields []Field) {
+	for _, f := range fields {
+		fmt.Fprintf(b, "| `%s%s` | %s |\n", prefix, f.Name, f.Description)
+		writeRows(b, prefix+f.Name+".", f.Children)
+	}
 }
