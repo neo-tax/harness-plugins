@@ -313,3 +313,31 @@ func TestResumedSessionCloseIsKept(t *testing.T) {
 		t.Fatalf("%+v %s", ir, body)
 	}
 }
+
+// A fork re-sends its parent's turns and pull requests under its own session
+// id; they add nothing.
+// @spec: session-event-wire-contract#idempotency-key
+func TestForkCopiesAreDuplicates(t *testing.T) {
+	h := start(t, fakeingest.Options{})
+	er := h.enroll()
+	parent := turn(er.DeviceID, "msg_1")
+	fork := turn(er.DeviceID, "msg_1")
+	fork.SessionID = "s-fork"
+	own := turn(er.DeviceID, "msg_2")
+	own.SessionID = "s-fork"
+	pr := func(session string) contract.PROpened {
+		env := parent.Envelope
+		env.SessionID = session
+		return contract.NewPROpened(env, contract.PROpenedFields{Repo: &contract.Repo{Host: "github.com", Owner: "o", Name: "r"}, Number: 7, Timestamp: env.SentAt})
+	}
+	h.ingest(er.DeviceKey, parent, pr("s-1"))
+	_, ir, body := h.ingest(er.DeviceKey, fork, pr("s-fork"), own)
+	if ir.Accepted != 1 || ir.Duplicates != 2 {
+		t.Fatalf("%+v %s", ir, body)
+	}
+	for _, ev := range h.recorded() {
+		if ev["message_id"] == "msg_1" && ev["session_id"] != "s-1" {
+			t.Errorf("the parent's turn moved to %v", ev["session_id"])
+		}
+	}
+}

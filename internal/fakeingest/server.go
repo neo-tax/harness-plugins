@@ -193,23 +193,25 @@ func (s *Server) takeFault() string {
 	return s.fault
 }
 
-// idempotencyKey is the server's notion of "the same event".
+// idempotencyKey is the server's notion of "the same event". Turns and pull
+// requests are keyed without the session, so a fork's copies of its parent's
+// add nothing.
 //
 // @spec: session-event-wire-contract#idempotency-key
 func idempotencyKey(ev map[string]any) string {
-	key := fmt.Sprint(ev["device_id"], "\x00", ev["session_id"], "\x00", ev["event_kind"])
-	if id, ok := ev["message_id"]; ok {
-		key += "\x00" + fmt.Sprint(id)
-	}
-	if ev["event_kind"] == contract.KindPROpened {
+	key := fmt.Sprint(ev["device_id"], "\x00", ev["event_kind"])
+	switch ev["event_kind"] {
+	case contract.KindTurn:
+		return key + "\x00" + fmt.Sprint(ev["message_id"])
+	case contract.KindPROpened:
 		repo, _ := json.Marshal(ev["repo"])
-		key += "\x00" + string(repo) + "\x00" + fmt.Sprint(ev["number"])
-	}
-	if ev["event_kind"] == contract.KindClosed {
+		return key + "\x00" + string(repo) + "\x00" + fmt.Sprint(ev["number"])
+	case contract.KindClosed:
 		// A resumed session closes again; its later close is kept.
-		key += "\x00" + fmt.Sprint(ev["ended_at"])
+		return key + "\x00" + fmt.Sprint(ev["session_id"], "\x00", ev["ended_at"])
+	default:
+		return key + "\x00" + fmt.Sprint(ev["session_id"])
 	}
-	return key
 }
 
 func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {

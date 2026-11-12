@@ -5,7 +5,7 @@ owner:
   - Firas Abuzaid
 created: 2026-10-24
 updated: 2026-11-14
-version: 7
+version: 8
 affects:
   - contract/*.schema.json
   - contract/*.go
@@ -41,8 +41,7 @@ The plugin's ingest endpoint is one of Neo.Tax's two entry points into the sessi
 - `side-usage-cumulative`(approved): `side_usage` covers the whole session up to that close, so the server takes it from the session's `session.closed` with the latest `ended_at` whose `side_usage` is not null, and never adds two closes' `side_usage` together.
 - `repo-shape`(tested): `repo` is either null or an object of `host`, `owner`, and `name`, each lowercase.
 - `subagent-turns-belong-to-parent`(tested): A turn produced by a subagent carries the parent session's `session_id` and a non-null `subagent_id`; a main-thread turn carries a null `subagent_id`.
-- `idempotency-key`(built): The server treats two events with the same `device_id`, `session_id`, `event_kind`, and `message_id` as the same event; for `session.pr_opened` the key adds `repo` and `number`; for `session.closed` it adds `ended_at`, so a resumed session's later close is kept; for `session.opened`, without a `message_id`, the key uses the event kind alone within the session.
-  - status-reason: unmerged: built in platform-new #5601, which is still open, and tested there in projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts
+- `idempotency-key`(approved): The server treats two `session.turn` events with the same `device_id` and `message_id` as the same event whatever their `session_id`, and two `session.pr_opened` events with the same `device_id`, `repo`, and `number` likewise, so a forked session that re-sends its parent's turns and pull requests under its own id adds nothing and the first one stored keeps its session; a `session.closed` is the same event as another with the same `device_id`, `session_id`, and `ended_at`, so a resumed session's later close is kept; a `session.opened` is the same as another with the same `device_id` and `session_id`.
 - `batched-ingest`(tested): An ingest request carries an ordered array of between 1 and 500 session events.
 - `ingest-response-per-event`(tested): An ingest response reports, for the batch as a whole, how many events were accepted, how many were duplicates, and the index and reason of each event rejected for schema reasons.
 - `schema-rejection-is-partial`(built): A schema-invalid event in a batch does not cause the server to reject the valid events in the same batch.
@@ -70,6 +69,8 @@ The contract carries one event per assistant message rather than a cumulative pe
 `email_confirmed_by` is in the enrollment request from the first version even though v0.1 only ever sends `engineer`, so managed enrollment in v1.0 adds no server-side change.
 
 Harness-specific identifiers (`session_id`, `message_id`, `request_id`, `subagent_id`) are passed through as the harness produced them; the contract does not normalize them beyond requiring strings. The message id and request id are held to that most strictly (`claude-code-transcript-parser#message-id-is-provider-id`, `claude-code-transcript-parser#request-id-from-transcript`), because they are the model provider's own ids for the API call, which telemetry and gateways also carry: the server joins a turn from this contract with another source's record of the same call on them (`otlp-ingest#call-ids`), so a normalized or synthesized value would split one turn into two.
+
+Turns and pull requests are keyed without the session because Claude Code copies a parent session's transcript into a fork, and the adapter reads the fork's transcript from the start: a capture on 2026-11-11 saw a fork re-send its parent's two turns with the same message and request ids under the fork's session id. Keyed by session, every fork would count its parent's usage again. A message id is the model provider's id for one response, so it names one turn on a device whichever session reports it. Pull requests opened are keyed the same way on the assumption that a fork also copies the transcript lines that record them; a pull request is opened once whichever session reports it.
 
 ## Risks
 
