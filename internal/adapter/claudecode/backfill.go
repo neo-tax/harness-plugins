@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -245,8 +246,24 @@ func withCursorLock(store *cursor.Store, fn func() error) error {
 
 // mainTranscripts lists every session's main transcript under projects/,
 // newest first by modification time.
+//
+// Older Claude Code builds wrote subagent transcripts beside the main ones
+// as agent-<id>.jsonl; newer builds put them under <session>/subagents/,
+// which tailWith reads. The legacy files are skipped rather than attached to
+// their parent through the sessionId on their lines: the hook path never
+// reads them, no fixture covers that format, and backfilling one on its own
+// would open a session named agent-<id> and count its turns as main-thread
+// turns.
+//
+// @spec: session-event-wire-contract#subagent-turns-belong-to-parent
 func mainTranscripts(projectsDir string) []string {
-	paths, _ := filepath.Glob(filepath.Join(projectsDir, "*", "*.jsonl"))
+	all, _ := filepath.Glob(filepath.Join(projectsDir, "*", "*.jsonl"))
+	var paths []string
+	for _, p := range all {
+		if !strings.HasPrefix(filepath.Base(p), "agent-") {
+			paths = append(paths, p)
+		}
+	}
 	mod := map[string]time.Time{}
 	for _, p := range paths {
 		if fi, err := os.Stat(p); err == nil {

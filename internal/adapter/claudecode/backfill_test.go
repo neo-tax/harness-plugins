@@ -216,3 +216,32 @@ func TestBackfillStopsWhenKeyRejected(t *testing.T) {
 		t.Fatalf("status %+v", st)
 	}
 }
+
+// Older Claude Code builds wrote subagent transcripts beside the main ones
+// as agent-<id>.jsonl. They are not sessions: a backfill never opens one or
+// counts its turns as main-thread turns.
+// @spec: session-event-wire-contract#subagent-turns-belong-to-parent
+// @spec: event-queue-and-backfill#backfill-scope
+func TestBackfillSkipsLegacySubagentTranscripts(t *testing.T) {
+	h := newHookEnv(t, true)
+	root := projects(t, h.repo)
+	legacy := filepath.Join(root, "projects", "-some-project", "agent-legacy1.jsonl")
+	os.WriteFile(legacy, []byte(`{"type":"user","isSidechain":true,"sessionId":"new-session","agentId":"legacy1","timestamp":"2026-10-26T09:00:02Z","cwd":"`+h.repo+`","version":"2.1.310","message":{"content":"x"}}
+{"type":"assistant","isSidechain":true,"sessionId":"new-session","agentId":"legacy1","timestamp":"2026-10-26T09:00:03Z","version":"2.1.310","requestId":"req_L","message":{"id":"msg_L","model":"m","usage":{"input_tokens":1,"output_tokens":1}}}
+`), 0o600)
+	out, err := h.backfill(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range h.recorded() {
+		if id, _ := e["session_id"].(string); strings.HasPrefix(id, "agent-") {
+			t.Fatalf("legacy subagent transcript backfilled as a session: %v", e)
+		}
+		if e["message_id"] == "msg_L" && e["subagent_id"] == nil {
+			t.Fatalf("legacy subagent turn counted as a main-thread turn: %v", e)
+		}
+	}
+	if !strings.Contains(out, "2 sessions") {
+		t.Errorf("output %q", out)
+	}
+}
