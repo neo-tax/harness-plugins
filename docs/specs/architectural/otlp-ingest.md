@@ -5,7 +5,7 @@ owner:
   - Firas Abuzaid
 created: 2026-11-02
 updated: 2026-11-11
-version: 4
+version: 5
 affects:
 ---
 
@@ -39,7 +39,7 @@ v0.1 takes Claude Code's own export, sent directly by managed settings: logs and
 ### Claude Code log mapping
 
 - `mapping-per-source`(approved): Each source has its own mapping from its attribute names to the session record, chosen by the record's event name, and a record no mapping claims is dropped.
-- `claude-code-api-request-is-turn`(approved): Each Claude Code `claude_code.api_request` log record becomes one turn of the session named by its `session.id` attribute.
+- `claude-code-api-request-is-turn`(approved): Each Claude Code log record whose `event.name` attribute is `api_request` (its body is `claude_code.api_request`; the OTLP `eventName` field is empty) becomes one turn of the session named by its `session.id` attribute.
 - `claude-code-other-events-dropped`(approved): Every other Claude Code event, including prompts, assistant responses, tool results and decisions, API errors, and API request and response bodies, is dropped and is not counted as rejected.
 - `claude-code-fixture`(approved): The Claude Code mapping is specified by a fixture: a captured Claude Code OTLP/JSON log export paired with the turns it must produce.
 - `claude-code-turn-mapping`(approved): A Claude Code turn takes its model from `model`; its input, output, and cache read counts from `input_tokens`, `output_tokens`, and `cache_read_tokens`; its cache write counts from `cache_creation_5m_tokens` and `cache_creation_1h_tokens`; its timestamp from `event.timestamp`; its request id from `request_id`; and its estimated cost from `cost_usd`.
@@ -66,7 +66,7 @@ v0.1 takes Claude Code's own export, sent directly by managed settings: logs and
 - `join-on-request-id`(approved): Two turns in one organization that were not joined by response id and share a non-null request id are one turn, counted once, unless both carry response ids and those differ.
 - `telemetry-turn-idempotent`(approved): A re-exported telemetry record is joined to its earlier copy by `join-on-response-id` or `join-on-request-id`, so it adds nothing.
 - `turn-without-call-id`(draft): A telemetry turn with neither call id, and from v1.0 no fingerprint match, is stored on its own, keyed by its session id, timestamp, and model.
-- `one-turn-per-call-id`(draft): Plugin turns in one organization that share a call id are one turn: the first stored keeps its session, and later ones are counted as duplicates.
+- `one-turn-per-call-id`(approved): Plugin turns in one organization that share a call id are one turn: the first stored keeps its session, and later ones are counted as duplicates.
 - `join-key-recorded`(approved): A joined turn records the key that joined it (response id, request id, or fingerprint), so the join rate can be measured per source and per key.
 - `join-order-independent`(approved): A joined turn is the same whichever of its two paths arrives first.
 - `telemetry-wins-usage`(approved): A joined turn takes its token counts and cost from telemetry, and its model from telemetry when telemetry carries one, else from the plugin.
@@ -120,6 +120,8 @@ v0.1 takes OTLP/JSON only, because it is what Claude Code sends when managed set
 
 The endpoint answers rejected records through OTLP's own partial success message rather than a Neo.Tax shape, so an unmodified exporter handles the response correctly. OTLP's response carries a count and one message, not a per-record index the way the plugin's ingest response does.
 
+A capture on 2026-11-11 (Claude Code 2.1.322, `scripts/dev.sh` against the fake ingest server: one new session, a resume of it, and a fork of it) settled three questions. Telemetry's `session.id` equalled the hooks' `session_id` in all three: a resume kept the id on both paths and a fork took a new one on both. A fork's plugin events re-sent the parent's two turns under the fork's session id with the same message and request ids, while telemetry reported only the fork's own call, which is why `one-turn-per-call-id` is approved rather than draft. And no Claude Code telemetry record carries the response id: `api_request` has `request_id` and a `client_request_id` of Claude Code's own, so Claude Code turns join on the request id alone. The same capture showed the split cache write attributes present, prompts and assistant responses redacted unless the exporter is told otherwise, metrics sent in delta temporality, and the event name in the `event.name` attribute rather than OTLP's `eventName` field.
+
 ## Alternatives Considered
 
 | Option | Pros | Cons |
@@ -146,11 +148,9 @@ The endpoint answers rejected records through OTLP's own partial success message
 
 ## Open Questions
 
-- Whether Claude Code's `session.id` always equals the `session_id` its hooks receive, so a telemetry-only turn and the plugin's `session.opened` name the same session.
-- Whether a forked Claude Code session re-sends its parent's turns under the new session id with the same request ids, which `one-turn-per-call-id` assumes it may.
+- Whether `/clear` starts a new `session.id` in telemetry at the same moment the hooks see a new `session_id`; the capture below ran headless, where `/clear` is unavailable.
 - What a turn without a call id should be keyed by, and whether such turns occur on the Anthropic API at all.
 - How to group a source's telemetry-only turns into sessions when it sends no session id (Kong's spans carry none): by trace id, or by ingest key, engineer, and an idle gap.
-- Whether Claude Code's telemetry can carry the response id, which would let its turns join on the stronger key.
 - Whether a session's metrics name the same session id as its logs on a cloud session, where Claude Code also sends `ccr.session.id`.
 - Whether `claude_code.code_edit_tool.decision` (edits accepted and rejected) is worth keeping as a measure of how much of an agent's output an engineer used.
 - Whether a metric session with no turns from either path happens often enough to approve `metric-usage-fallback`.
