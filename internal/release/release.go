@@ -4,10 +4,10 @@
 //
 // Release procedure: bump plugins/*/.claude-plugin/plugin.json to the new
 // version on main, push the tag, and the release workflow checks, builds,
-// publishes, and only then pins .claude-plugin/marketplace.json to the tag on
-// main. Until that last step the marketplace keeps pointing at the previous
-// release, so no engineer is ever pointed at a tag whose binaries are not
-// attached yet.
+// publishes, and only then opens a pull request that pins
+// .claude-plugin/marketplace.json to the tag on main. Until that pull request
+// merges the marketplace keeps pointing at the previous release, so no
+// engineer is ever pointed at a tag whose binaries are not attached yet.
 package release
 
 import (

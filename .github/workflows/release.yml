@@ -155,8 +155,11 @@ jobs:
 
   # Only after the release and its binaries exist does the stable marketplace
   # on main point at the tag, so an install or auto-update never lands on a
-  # tag whose binaries are missing.
+  # tag whose binaries are missing. main is protected (pull request with one
+  # approval, signed commits), so the pin reaches it as a pull request whose
+  # commit is created through the GitHub API, which GitHub signs.
   # @spec: test-and-release#marketplace-source-is-this-repo
+  # @spec: test-and-release#pin-through-pull-request
   pin_marketplace:
     needs: publish
     # publish runs after skipped v0 signing jobs; without an explicit
@@ -165,20 +168,59 @@ jobs:
     concurrency:
       group: pin_marketplace
       cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
       - run: go run ./cmd/release-check -pin "$GITHUB_REF_NAME"
-      - name: Commit the pinned marketplace to main
+      - name: Open a pull request that pins the marketplace on main
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git diff --quiet && exit 0
-          git commit -am "Pin the marketplace to $GITHUB_REF_NAME"
-          git pull --rebase origin main
-          git push origin HEAD:main
+          if git diff --quiet; then
+            echo "main already pins the marketplace to $GITHUB_REF_NAME"
+            exit 0
+          fi
+          branch="release/pin-$GITHUB_REF_NAME"
+          title="Pin the marketplace to $GITHUB_REF_NAME"
+
+          # A rerun after the pull request was opened has nothing to do.
+          open=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --base main --state open --json url --jq '.[0].url // empty')
+          if [ -n "$open" ]; then
+            echo "already open: $open"
+            exit 0
+          fi
+
+          # Start the branch at main's head, resetting it if an earlier run
+          # left it behind without a pull request.
+          base=$(git rev-parse HEAD)
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/heads/$branch" -f sha="$base" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch" -f sha="$base" -F force=true >/dev/null
+          fi
+
+          # createCommitOnBranch commits as the token's identity and GitHub
+          # signs the commit; a custom author or committer would drop that.
+          git diff --name-only | while read -r f; do
+            jq -n --arg path "$f" --arg contents "$(base64 -w0 "$f")" '{path: $path, contents: $contents}'
+          done | jq -s \
+            --arg repo "$GITHUB_REPOSITORY" --arg branch "$branch" \
+            --arg oid "$base" --arg headline "$title" \
+            '{query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }",
+              variables: {input: {
+                branch: {repositoryNameWithOwner: $repo, branchName: $branch},
+                expectedHeadOid: $oid,
+                message: {headline: $headline},
+                fileChanges: {additions: .}}}}' >"$RUNNER_TEMP/commit.json"
+          gh api graphql --input "$RUNNER_TEMP/commit.json" --jq '.data.createCommitOnBranch.commit.oid'
+
+          gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$branch" --title "$title" --body "Opened by the release workflow after $GITHUB_REF_NAME was published with its binaries attached. Merging it points the stable marketplace, and every engineer's install and auto-update, at $GITHUB_REF_NAME. main requires one approval, so approve and squash-merge it.
+
+          Pull requests opened with the workflow token do not trigger CI; the change is the marketplace's version and ref fields only."

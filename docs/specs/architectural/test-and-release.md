@@ -5,7 +5,7 @@ owner:
   - Firas Abuzaid
 created: 2026-10-24
 updated: 2026-11-11
-version: 2
+version: 3
 affects:
   - internal/fakeingest/*.go
   - .github/workflows/ci.yml
@@ -45,6 +45,8 @@ Governs how the agent and plugins are tested, how a release is cut, and what art
   - status-reason: the release workflow's publish job; exercised by the first release
 - `manifest-version-matches-tag`(tested): The release workflow fails if any plugin manifest's version, or the latest channel marketplace's version, differs from the tag; the stable marketplace's version is set to the tag when the marketplace is pinned after publish.
 - `marketplace-source-is-this-repo`(tested): The marketplace manifest's source for each plugin is this repository at the released tag, so a harness's plugin auto-update follows releases.
+- `pin-through-pull-request`(built): The stable marketplace's pin reaches main through a pull request that the release workflow opens after publish, carrying one signed commit, and merging it needs one approval; the workflow never pushes to main.
+  - status-reason: the release workflow's pin_marketplace job; exercised by the first release that moves the pin, not by a test
 - `single-channel-v0-1`(tested): v0.1 publishes one marketplace that tracks the latest release.
 - `unsigned-binaries-v0-1`(built): v0.1 binaries are unsigned.
   - status-reason: v0.x releases skip both signing jobs; structural
@@ -56,13 +58,22 @@ Governs how the agent and plugins are tested, how a release is cut, and what art
 
 ## Design Notes
 
-The marketplace's plugin source is a `git-subdir` of this repository at the release tag, so the plugin version an engineer gets is exactly the tagged tree. A release bumps each `plugin.json` on main and pushes the tag; the release workflow checks the manifests against the tag, builds, publishes, and only then pins the stable marketplace on main to the tag, so the marketplace never points at a tag whose binaries are not attached yet; the plugin's launcher then downloads the agent binary attached to that tag and checks it against the release's `checksums.txt`. From v1.0 a second marketplace under `channels/latest/` points the same plugin at `main`.
+The marketplace's plugin source is a `git-subdir` of this repository at the release tag, so the plugin version an engineer gets is exactly the tagged tree. A release bumps each `plugin.json` on main and pushes the tag; the release workflow checks the manifests against the tag, builds, publishes, and only then opens a pull request that pins the stable marketplace on main to the tag, so the marketplace never points at a tag whose binaries are not attached yet. main's ruleset requires a pull request with one approval and signed commits, and the workflow cannot bypass it, so the workflow creates the pin commit through the GitHub API (which signs it) on a `release/pin-<tag>` branch rather than pushing; a rerun finds the open pull request and stops. Once the pin merges, the plugin's launcher downloads the agent binary attached to that tag and checks it against the release's `checksums.txt`. From v1.0 a second marketplace under `channels/latest/` points the same plugin at `main`.
 
 Fixtures are the contract between the adapter and the harness: when a harness ships a new transcript format, the response is a new anonymized fixture and, only if it fails, a parser change. This keeps harness variability as data rather than code branches.
 
 The install smoke test is the only test that exercises the harness's own hook dispatch; everything else stubs the harness by exec'ing the agent directly.
 
 The agent is a static Go binary. It ships to every engineer's laptop, often pushed by a customer's IT through device management, so it must run with no runtime present and be small enough to live in every harness's plugin cache: Go cross-compiles to roughly 10 MB static binaries per target with no toolchain work, signs and notarizes cleanly, and is the conventional choice for fleet-deployed agents, which makes it the easiest story for a customer's security review. Nobody on the team has Go experience, so the binary is kept deliberately small (hook glue, transcript parsing, queue, HTTP client). The choice stays cheap to reverse only while two boundaries hold: the wire contract is specified in JSON Schema and never derived from Go types, and the harness boundary is exec-the-binary-with-the-event-on-argv-and-the-payload-on-stdin. With those held, swapping the language is a rewrite of one binary against the existing fixtures, and the end-to-end test above is what proves the boundary is honored.
+
+### Cutting a release
+
+1. Open a pull request that sets `version` in every `plugins/*/.claude-plugin/plugin.json` to the new version (and, from v1.0, the metadata and plugin versions in `channels/latest/marketplace.json`). Leave `.claude-plugin/marketplace.json` alone; the pin sets it. `go run ./cmd/release-check vX.Y.Z` passes locally when the bump is complete.
+2. Merge it, then tag main's resulting commit and push the tag: `git tag vX.Y.Z <sha> && git push origin vX.Y.Z`.
+3. Wait for the release workflow to finish. It fails before building if the manifests disagree with the tag.
+4. Approve and squash-merge the `Pin the marketplace to vX.Y.Z` pull request it opens. Until then engineers stay on the previous release. Pull requests opened with the workflow token do not trigger CI.
+
+The first release is the exception: `.claude-plugin/marketplace.json` already names `v0.1.0`, so until that tag is released an install resolves a tag that does not exist. v0.1.0 is tagged as soon as the v0.1 stack merges; its pin is then a no-op and no pull request is opened. A pre-release relative source would not help: the plugin's launcher downloads the agent from the GitHub release for the plugin's version, so an install before v0.1.0 exists has no binary either way.
 
 ## Risks
 

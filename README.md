@@ -61,4 +61,4 @@ Fleet-wide, through managed settings:
 
 ## Releases
 
-A semantic-version tag builds the agent and the fake ingest server for macOS (arm64, amd64), Linux (amd64, arm64), and Windows (amd64), attaches them to a GitHub release, and the marketplace follows the tag.
+A semantic-version tag builds the agent and the fake ingest server for macOS (arm64, amd64), Linux (amd64, arm64), and Windows (amd64), attaches them to a GitHub release, and then opens a pull request that pins the marketplace to the tag; merging it (one approval) moves every install to the release. The step-by-step procedure is under "Cutting a release" in `docs/specs/architectural/test-and-release.md`.
