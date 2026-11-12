@@ -5,7 +5,7 @@ owner:
   - Firas Abuzaid
 created: 2026-11-02
 updated: 2026-11-11
-version: 5
+version: 6
 affects:
 ---
 
@@ -120,7 +120,7 @@ v0.1 takes OTLP/JSON only, because it is what Claude Code sends when managed set
 
 The endpoint answers rejected records through OTLP's own partial success message rather than a Neo.Tax shape, so an unmodified exporter handles the response correctly. OTLP's response carries a count and one message, not a per-record index the way the plugin's ingest response does.
 
-A capture on 2026-11-11 (Claude Code 2.1.322, `scripts/dev.sh` against the fake ingest server: one new session, a resume of it, and a fork of it) settled three questions. Telemetry's `session.id` equalled the hooks' `session_id` in all three: a resume kept the id on both paths and a fork took a new one on both. A fork's plugin events re-sent the parent's two turns under the fork's session id with the same message and request ids, while telemetry reported only the fork's own call, which is why `one-turn-per-call-id` is approved rather than draft. And no Claude Code telemetry record carries the response id: `api_request` has `request_id` and a `client_request_id` of Claude Code's own, so Claude Code turns join on the request id alone. The same capture showed the split cache write attributes present, prompts and assistant responses redacted unless the exporter is told otherwise, metrics sent in delta temporality, and the event name in the `event.name` attribute rather than OTLP's `eventName` field.
+A capture on 2026-11-11 (Claude Code 2.1.322, `scripts/dev.sh` against the fake ingest server: one new session, a resume of it, and a fork of it) settled three questions. Telemetry's `session.id` equalled the hooks' `session_id` in all three: a resume kept the id on both paths and a fork took a new one on both. A fork's plugin events re-sent the parent's two turns under the fork's session id with the same message and request ids, while telemetry reported only the fork's own call, which is why `one-turn-per-call-id` is approved rather than draft. A second, interactive capture the same day ran a prompt, `/clear`, and another prompt: the plugin closed the first session with reason `clear` and opened the next with source `clear`, and telemetry moved to the same new `session.id` at the same point, so the two paths agree across `/clear` too. Its title-generation calls appeared only in telemetry, as `side-usage-yields-to-telemetry` expects. And no Claude Code telemetry record carries the response id: `api_request` has `request_id` and a `client_request_id` of Claude Code's own, so Claude Code turns join on the request id alone. The same capture showed the split cache write attributes present, prompts and assistant responses redacted unless the exporter is told otherwise, metrics sent in delta temporality, and the event name in the `event.name` attribute rather than OTLP's `eventName` field.
 
 ## Alternatives Considered
 
@@ -148,7 +148,6 @@ A capture on 2026-11-11 (Claude Code 2.1.322, `scripts/dev.sh` against the fake 
 
 ## Open Questions
 
-- Whether `/clear` starts a new `session.id` in telemetry at the same moment the hooks see a new `session_id`; the capture below ran headless, where `/clear` is unavailable.
 - What a turn without a call id should be keyed by, and whether such turns occur on the Anthropic API at all.
 - How to group a source's telemetry-only turns into sessions when it sends no session id (Kong's spans carry none): by trace id, or by ingest key, engineer, and an idle gap.
 - Whether a session's metrics name the same session id as its logs on a cloud session, where Claude Code also sends `ccr.session.id`.
