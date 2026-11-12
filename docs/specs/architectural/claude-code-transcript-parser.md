@@ -4,8 +4,8 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-10-24
-updated: 2026-10-25
-version: 1
+updated: 2026-11-12
+version: 2
 affects:
   - internal/adapter/claudecode/*.go
   - internal/cursor/*.go
@@ -46,11 +46,14 @@ The `Stop` hook fires on the main thread after each assistant turn, which is fre
 
 A transcript that reports cache creation without the five-minute and one-hour split (older versions) maps the whole amount to `cache_write_5m`, the only TTL those versions wrote. A turn takes the usage, model, request id, and timestamp of its message's first line.
 
+Claude Code cancels a synchronous `SessionEnd` hook 1.5 seconds after it starts, and a plugin hook's own `timeout` does not extend that. An async hook is not canceled: it keeps running after Claude Code exits. A probe hook that ran for 14 seconds finished on Claude Code 2.1.322 (macOS) after `claude -p`, after `/exit`, and after the terminal was closed, while the same hook registered synchronously got SIGTERM at 1.5 seconds each time. `SessionEnd` relies on this: it waits up to 30 seconds for the cursor lock, because a tail it skips is recovered only by a backfill, and an engineer runs a backfill rarely.
+
 Resume and fork keep the harness's session id semantics: a resumed session reuses its id and produces a `session.opened` with `source` resume; a fork is a new session id with `source` fork. The server's idempotency key makes re-reading a resumed transcript harmless.
 
 ## Risks
 
 - **The harness changes its transcript format.** Turns stop being parsed and sessions report `usage.source` unknown. Mitigated by fixtures per harness version and by the usage-unknown rate being a v0.1 exit criterion; the agent logs a parse failure with the harness version and never crashes the hook.
+- **A harness release starts canceling async `SessionEnd` hooks.** A hook canceled before its events are queued loses `session.closed` and the session's final tail. Detected by the server's rate of sessions without `session.closed` per harness version; the install smoke test can assert `session.closed` arrives after the harness exits.
 - **A session with no `SessionEnd`.** The harness was killed and no `session.closed` arrives. Accepted; the server treats a session as closed after inactivity.
 
 ## Open Questions
