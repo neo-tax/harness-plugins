@@ -13,8 +13,16 @@ import (
 )
 
 // CostStateWait bounds how long SessionEnd waits for the cost-state line
-// Claude Code writes as it exits.
+// Claude Code writes as it exits. The line is written before SessionEnd
+// fires, so the wait only covers a slow write. The hook is async, so
+// Claude Code does not cancel it during the wait.
 var CostStateWait = 2 * time.Second
+
+// exitReasons are the SessionEnd reasons on which the Claude Code process
+// exits and so writes cost-state. On the others (/clear, logout, /resume)
+// the process keeps running and no line is coming, so the totals are read
+// once without waiting.
+var exitReasons = map[string]bool{"prompt_input_exit": true, "other": true}
 
 // costState is the subset of a cost-state line the adapter decodes: the
 // session's per-model token totals for one process's tally.
@@ -117,15 +125,19 @@ func (s *totalsScan) totals() map[string]contract.SideUsage {
 // sideUsage is the usage of the session's API calls that produced no turn:
 // its totals less every turn of the session, per model and count, clamped at
 // zero so a harness that under-records never yields negative usage. It is
-// nil when no current totals appear within CostStateWait, or when the
+// nil when no current totals appear within CostStateWait (at once, when
+// reason is not an exit), or when the
 // transcripts could not all be read, since subtracting a partial set of
 // turns would over-report.
 //
 // @spec: claude-code-transcript-parser#session-totals-from-cost-state
 // @spec: claude-code-transcript-parser#side-usage-is-totals-minus-turns
 // @spec: claude-code-transcript-parser#side-usage-null-without-totals
-func sideUsage(ctx Context, mainPath string) ([]contract.SideUsage, error) {
-	deadline := time.Now().Add(CostStateWait)
+func sideUsage(ctx Context, mainPath, reason string) ([]contract.SideUsage, error) {
+	deadline := time.Now()
+	if exitReasons[reason] {
+		deadline = deadline.Add(CostStateWait)
+	}
 	scan := &totalsScan{path: mainPath, tallies: map[int64]costState{}}
 	err := scan.advance()
 	for err == nil && !scan.current && time.Now().Before(deadline) {

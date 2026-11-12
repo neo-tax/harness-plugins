@@ -224,6 +224,37 @@ func TestSessionEndTotalsStayCurrentAfterExitLines(t *testing.T) {
 	}
 }
 
+// /clear, logout, and /resume end a session without the process exiting, so
+// no cost-state line is coming; SessionEnd reads once and does not wait.
+// @spec: claude-code-transcript-parser#side-usage-null-without-totals
+func TestSessionEndWaitsForCostStateOnlyOnExit(t *testing.T) {
+	defer setCostStateWait(5 * time.Second)()
+	for _, reason := range []string{"clear", "logout", "resume"} {
+		h := newHookEnv(t, true)
+		start := time.Now()
+		h.run("SessionEnd", map[string]any{"reason": reason})
+		if d := time.Since(start); d > time.Second {
+			t.Fatalf("reason %s: SessionEnd took %v waiting for cost-state", reason, d)
+		}
+		if v, ok := h.closed()["side_usage"]; !ok || v != nil {
+			t.Fatalf("reason %s: side_usage %v (present %v), want null", reason, v, ok)
+		}
+	}
+}
+
+// Totals already current when a non-exit SessionEnd fires are still used.
+// @spec: claude-code-transcript-parser#side-usage-null-without-totals
+func TestSessionEndUsesCurrentCostStateWithoutWaiting(t *testing.T) {
+	defer setCostStateWait(5 * time.Second)()
+	h := newHookEnv(t, true)
+	h.appendLines(costState(1, map[string]map[string]int64{"claude-haiku-5-5": {"inputTokens": 905}}))
+	h.run("SessionEnd", map[string]any{"reason": "clear"})
+	want := []any{entry("claude-haiku-5-5", 900, 0, 0, 0, 0)}
+	if got := h.closed()["side_usage"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("side_usage %v, want %v", got, want)
+	}
+}
+
 func setCostStateWait(d time.Duration) func() {
 	old := claudecode.CostStateWait
 	claudecode.CostStateWait = d

@@ -124,12 +124,13 @@ func emit(a *agent.Agent, name string, p payload, o HookOptions) error {
 	git := gitident.Identify(p.Cwd)
 	ctx := Context{DeviceID: dev.DeviceID, AgentVersion: o.AgentVersion, SessionID: p.SessionID, Now: o.Now(), Git: git}
 
-	// Side usage only reads transcripts, and may wait for Claude Code to
-	// write its totals, so it runs before the cursor lock is taken.
+	// Side usage only reads transcripts, and on an exit may wait briefly for
+	// Claude Code to write its totals, so it runs before the cursor lock is
+	// taken.
 	var side []contract.SideUsage
 	if name == "SessionEnd" {
 		var err error
-		if side, err = sideUsage(ctx, p.TranscriptPath); err != nil {
+		if side, err = sideUsage(ctx, p.TranscriptPath, p.Reason); err != nil {
 			agent.Logf(o.DataDir, "hook=%s side usage unavailable: %s", name, errClass(err))
 		}
 	}
