@@ -65,7 +65,7 @@ jobs:
   # notarized and Windows binaries are signed before they are attached.
   # @spec: test-and-release#unsigned-binaries-v0-1
   # @spec: test-and-release#signing-v1-0
-  sign-macos:
+  sign_macos:
     needs: [check, build]
     if: needs.check.outputs.major >= 1
     runs-on: macos-latest
@@ -102,7 +102,7 @@ jobs:
           name: signed-darwin
           path: dist/*_darwin_*
 
-  sign-windows:
+  sign_windows:
     needs: [check, build]
     if: needs.check.outputs.major >= 1
     runs-on: windows-latest
@@ -129,7 +129,7 @@ jobs:
   # @spec: test-and-release#release-attaches-binaries
   # @spec: test-and-release#fake-ingest-is-released
   publish:
-    needs: [check, build, sign-macos, sign-windows]
+    needs: [check, build, sign_macos, sign_windows]
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -157,13 +157,13 @@ jobs:
   # on main point at the tag, so an install or auto-update never lands on a
   # tag whose binaries are missing.
   # @spec: test-and-release#marketplace-source-is-this-repo
-  pin-marketplace:
+  pin_marketplace:
     needs: publish
     # publish runs after skipped v0 signing jobs; without an explicit
     # condition this job would inherit their skip.
     if: ${{ !cancelled() && needs.publish.result == 'success' }}
     concurrency:
-      group: pin-marketplace
+      group: pin_marketplace
       cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:

@@ -28,7 +28,7 @@ jobs:
           done
 
   # @spec: test-and-release#plugin-validate-in-ci
-  plugin-validate:
+  plugin_validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,7 +43,7 @@ jobs:
   # @spec: test-and-release#install-smoke-test
   # Not required until it has been stable for a release cycle; it needs the
   # ANTHROPIC_API_KEY secret and is skipped where that is absent (forks).
-  install-smoke:
+  install_smoke:
     runs-on: ubuntu-latest
     continue-on-error: true
     env:

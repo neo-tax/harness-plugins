@@ -4,7 +4,7 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-10-24
-updated: 2026-10-25
+updated: 2026-11-11
 version: 2
 affects:
   - internal/fakeingest/*.go
@@ -35,7 +35,7 @@ Governs how the agent and plugins are tested, how a release is cut, and what art
 - `end-to-end-against-fake-ingest`(tested): A test execs the agent in the exact shape a harness hook does, with the hook name on the command line and a payload on standard input, against the fake ingest server, and asserts the recorded events.
 - `fake-ingest-fault-modes`(tested): The fake ingest server can be instructed to return a schema rejection, an authentication rejection, a server error, or to stall, so the queue's failure paths are tested end to end.
 - `plugin-validate-in-ci`(built): CI runs the harness's plugin validation command against the marketplace manifest and every plugin directory.
-  - status-reason: a CI job (plugin-validate in .github/workflows/ci.yml); it is not a Go test
+  - status-reason: a CI job (plugin_validate in .github/workflows/ci.yml); it is not a Go test
 - `install-smoke-test`(tested): CI installs the plugin from the repository into a throwaway harness configuration directory, runs one non-interactive prompt with hooks pointed at the fake ingest server, and asserts one `session.opened`, one `session.turn`, and one `session.closed` arrived.
 - `release-on-tag`(built): Pushing a semantic-version tag triggers the release workflow; nothing else publishes a release.
   - status-reason: the release workflow triggers only on v*.*.* tags; exercised by the first release, not by a test
@@ -49,7 +49,7 @@ Governs how the agent and plugins are tested, how a release is cut, and what art
 - `unsigned-binaries-v0-1`(built): v0.1 binaries are unsigned.
   - status-reason: v0.x releases skip both signing jobs; structural
 - `signing-v1-0`(built): From v1.0 the release workflow notarizes macOS binaries and signs Windows binaries.
-  - status-reason: the sign-macos and sign-windows jobs run only for v1+ tags and need signing secrets that do not exist yet
+  - status-reason: the sign_macos and sign_windows jobs run only for v1+ tags and need signing secrets that do not exist yet
 - `stable-and-latest-channels-v1-0`(tested): From v1.0 a stable marketplace points at the last tagged release and a latest marketplace points at the main branch.
 - `fake-ingest-is-released`(built): The fake ingest server ships as its own binary in every release.
   - status-reason: the release workflow builds and attaches fake-ingest for every target; exercised by the first release
