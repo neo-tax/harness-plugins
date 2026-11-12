@@ -318,7 +318,8 @@ func TestResumedSessionCloseIsKept(t *testing.T) {
 // id; they add nothing.
 // @spec: session-event-wire-contract#idempotency-key
 func TestForkCopiesAreDuplicates(t *testing.T) {
-	h := start(t, fakeingest.Options{})
+	var dups bytes.Buffer
+	h := start(t, fakeingest.Options{RecordDuplicates: &dups})
 	er := h.enroll()
 	parent := turn(er.DeviceID, "msg_1")
 	fork := turn(er.DeviceID, "msg_1")
@@ -338,6 +339,20 @@ func TestForkCopiesAreDuplicates(t *testing.T) {
 	for _, ev := range h.recorded() {
 		if ev["message_id"] == "msg_1" && ev["session_id"] != "s-1" {
 			t.Errorf("the parent's turn moved to %v", ev["session_id"])
+		}
+	}
+	// The dropped copies are recorded as sent, under the fork's session.
+	lines := bytes.Split(bytes.TrimSpace(dups.Bytes()), []byte("\n"))
+	if len(lines) != 2 {
+		t.Fatalf("recorded %d duplicates: %s", len(lines), dups.Bytes())
+	}
+	for _, l := range lines {
+		var ev map[string]any
+		if err := json.Unmarshal(l, &ev); err != nil {
+			t.Fatal(err)
+		}
+		if ev["session_id"] != "s-fork" {
+			t.Errorf("duplicate recorded under %v", ev["session_id"])
 		}
 	}
 }

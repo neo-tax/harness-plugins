@@ -33,6 +33,10 @@ type Options struct {
 	StallFor time.Duration
 	// Record, when set, receives one JSON line per accepted event.
 	Record io.Writer
+	// RecordDuplicates, when set, receives one JSON line per event dropped
+	// as a duplicate, so a caller can see what was re-sent, not only how
+	// many.
+	RecordDuplicates io.Writer
 	// IngestKeys, when non-empty, is the set of keys the OTLP endpoints
 	// accept. When empty, any key that is not a device key is accepted.
 	IngestKeys []string
@@ -289,6 +293,9 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 		k := idempotencyKey(ev)
 		if s.seen[k] {
 			resp.Duplicates++
+			if s.opts.RecordDuplicates != nil {
+				s.opts.RecordDuplicates.Write(append(append([]byte{}, raw...), '\n'))
+			}
 			continue
 		}
 		s.seen[k] = true

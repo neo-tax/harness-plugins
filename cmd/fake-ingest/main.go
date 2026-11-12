@@ -25,6 +25,7 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:8787", "listen address")
 	base := flag.String("ingest-base-url", "", "ingest base URL returned at enrollment (default: the request's own host)")
 	record := flag.String("record", "", "append each accepted event as a JSON line to this file (- for stdout)")
+	recordDups := flag.String("record-duplicates", "", "append each event dropped as a duplicate as a JSON line to this file")
 	recordOTLP := flag.String("record-otlp", "", "append each OTLP log record or metric data point as a JSON line to this file")
 	var toks, ingestKeys tokens
 	flag.Var(&toks, "enrollment-token", "enrollment token to accept (repeatable; default: accept any)")
@@ -39,6 +40,14 @@ func main() {
 		}
 		defer f.Close()
 		opts.RecordOTLP = f
+	}
+	if *recordDups != "" {
+		f, err := os.OpenFile(*recordDups, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer f.Close()
+		opts.RecordDuplicates = f
 	}
 	switch *record {
 	case "":

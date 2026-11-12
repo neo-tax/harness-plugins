@@ -116,7 +116,7 @@ up() {
 
   if ! running fake-ingest; then
     port_free "$port" NEO_TAX_DEV_PORT
-    "$dev/bin/fake-ingest" -addr "127.0.0.1:$port" -record "$dev/events.jsonl" -record-otlp "$dev/otlp.jsonl" -ingest-key dev-ingest >"$dev/fake-ingest.log" 2>&1 &
+    "$dev/bin/fake-ingest" -addr "127.0.0.1:$port" -record "$dev/events.jsonl" -record-duplicates "$dev/duplicates.jsonl" -record-otlp "$dev/otlp.jsonl" -ingest-key dev-ingest >"$dev/fake-ingest.log" 2>&1 &
     echo $! >"$dev/fake-ingest.pid"
     if ! wait_http "http://127.0.0.1:$port/_fake/events" || ! running fake-ingest; then
       die "fake ingest did not start; see $dev/fake-ingest.log"
@@ -226,6 +226,7 @@ capture() {
   [ "${NEO_TAX_DEV_OTLP:-1}" != 0 ] || die "capture needs telemetry; unset NEO_TAX_DEV_OTLP"
   conf=$(config_dir)
   [ -n "$conf" ] || die "capture runs only against the throwaway config, not --my-config"
+  [ -f "$dev/duplicates.jsonl" ] || die "the running fake ingest does not record duplicates; run scripts/dev.sh down, then up"
   work="$dev/capture"
   mkdir -p "$work"
   [ -d "$work/.git" ] || git -C "$work" init -q
@@ -237,6 +238,7 @@ capture() {
     && mv "$conf/.claude.json.tmp" "$conf/.claude.json"
   touch "$dev/events.jsonl" "$dev/otlp.jsonl"
   ev_from=$(($(wc -l <"$dev/events.jsonl") + 1))
+  dup_from=$(($(wc -l <"$dev/duplicates.jsonl") + 1))
   ot_from=$(($(wc -l <"$dev/otlp.jsonl") + 1))
   self="$repo/scripts/dev.sh"
 
@@ -277,12 +279,16 @@ EXP
   echo "capture: waiting for hooks and telemetry to flush"
   sleep 10
   tail -n +"$ev_from" "$dev/events.jsonl" >"$work/events.jsonl"
+  tail -n +"$dup_from" "$dev/duplicates.jsonl" >"$work/duplicates.jsonl"
   tail -n +"$ot_from" "$dev/otlp.jsonl" >"$work/otlp.jsonl"
   jq -n -r --arg a "$a" --arg r "$r" --arg f "$f" --arg work "$work" \
-    --slurpfile ev "$work/events.jsonl" --slurpfile ot "$work/otlp.jsonl" '
+    --slurpfile ev "$work/events.jsonl" --slurpfile dup "$work/duplicates.jsonl" --slurpfile ot "$work/otlp.jsonl" '
     def p(s): $ev | map(select(.session_id == s));
     def calls(s): $ot | map(select(.attributes["event.name"] == "api_request" and .attributes["session.id"] == s));
     def turnreqs(s): p(s) | map(select(.event_kind == "session.turn") | .request_id);
+    # A fork re-sends the parent turns under its own id; the server drops
+    # them as duplicates, so they land here and not in events.jsonl.
+    def dupreqs(s): $dup | map(select(.session_id == s and .event_kind == "session.turn") | .request_id);
     ($ev | map(select(.event_kind == "session.closed" and .reason == "clear")) | .[0].session_id) as $c
     | ($ev | map(select(.event_kind == "session.opened" and .source == "clear")) | .[0].session_id) as $d
     | ($ot | map(.attributes.request_id // empty)) as $otreqs
@@ -291,7 +297,8 @@ EXP
         ["new session reaches both paths", ($a != "" and (p($a) | length) > 0 and (calls($a) | length) > 0)],
         ["resume keeps the session id", ($r == $a)],
         ["fork gets a new id on both paths", ($f != $a and (p($f) | length) > 0 and (calls($f) | length) > 0)],
-        ["fork re-sends none of its parent turns", ((turnreqs($f) - turnreqs($a)) == turnreqs($f))],
+        ["fork stores none of its parent turns", ((turnreqs($f) - turnreqs($a)) == turnreqs($f))],
+        ["fork re-sends its parent turns as duplicates", ((dupreqs($f) | length) > 0 and (turnreqs($a) - dupreqs($f)) == [])],
         ["/clear closes one session and opens another", ($c != null and $d != null and $c != $d)],
         ["telemetry switches at /clear too", ($c != null and $d != null and (calls($c) | length) > 0 and (calls($d) | length) > 0)],
         ["every plugin turn has a telemetry call", (($turns | length) > 0 and ($turns - $otreqs) == [])]
@@ -299,7 +306,7 @@ EXP
     | ($checks[] | "\(if .[1] then "PASS" else "FAIL" end)  \(.[0])"),
       "",
       "sessions: new \($a[0:8])  fork \($f[0:8])  before /clear \(($c // "-")[0:8])  after /clear \(($d // "-")[0:8])",
-      "plugin turns: \($turns | length)  telemetry calls: \($ot | map(select(.attributes["event.name"] == "api_request")) | length)",
+      "plugin turns: \($turns | length)  fork duplicates: \(dupreqs($f) | length)  telemetry calls: \($ot | map(select(.attributes["event.name"] == "api_request")) | length)",
       (if all($checks[]; .[1]) then "capture: ok" else "capture: FAILED; inputs in \($work)" end)
     ' | tee "$work/report.txt"
   grep -q '^capture: ok' "$work/report.txt"
