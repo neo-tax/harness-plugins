@@ -56,7 +56,7 @@ func setup(t *testing.T) *env {
 	c := &clock{t: time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)}
 	q := queue.New(t.TempDir())
 	q.Now = c.now
-	client := &ingest.Client{HTTP: &http.Client{Timeout: 500 * time.Millisecond}, BaseURL: device.IngestBaseURL, DeviceKey: device.DeviceKey}
+	client := &ingest.Client{HTTP: &http.Client{Timeout: 10 * time.Second}, BaseURL: device.IngestBaseURL, DeviceKey: device.DeviceKey}
 	return &env{t: t, q: q, clock: c, srv: srv, client: client, device: device, hits: hits}
 }
 
@@ -287,6 +287,8 @@ func TestBackoffCeilingIsOneHour(t *testing.T) {
 func TestNetworkErrorsAndStallsBackOff(t *testing.T) {
 	e := setup(t)
 	e.appendN("a", 1)
+	// Shorter than the fake's 2-second stall, so the request times out.
+	e.client.HTTP.Timeout = 500 * time.Millisecond
 	e.fault(fakeingest.FaultStall, 1)
 	if res := e.flush(); !res.Failed || res.Sent != 0 {
 		t.Fatalf("stall: %+v", res)
