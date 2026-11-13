@@ -5,7 +5,7 @@ owner:
   - Firas Abuzaid
 created: 2026-11-02
 updated: 2026-11-13
-version: 8
+version: 9
 affects:
   - deploy/claude-code/*
   - internal/fakeingest/otlp*.go
@@ -105,6 +105,8 @@ v0.1 takes Claude Code's own export, sent directly by managed settings: logs and
   - status-reason: `scripts/dev.sh claude` sets the exporter environment; exercised by hand against a real Claude Code, which no automated test runs
 - `dev-stack-capture`(built): `scripts/dev.sh capture` runs a new session, a resume, a fork, and an interactive `/clear` through the dev stack, and fails unless the plugin and telemetry agree on every session id, a fork re-sends every one of its parent's turns and the fake ingest server drops each as a duplicate rather than storing it under the fork, and every plugin turn has a telemetry call with its request id.
   - status-reason: it drives a real, logged-in Claude Code, which CI does not have; run it by hand against each new Claude Code version
+- `dev-stack-private`(built): Every file the local dev stack writes under `.dev`, including the fake ingest server's recordings and the slices `capture` copies from them, is readable by the engineer alone, because recorded telemetry carries their email and account ids.
+  - status-reason: `scripts/dev.sh` sets `umask 077` and makes `.dev` mode 700, and the fake ingest server opens its recordings 0600; no automated test checks the modes
 
 ## Requirements (v1.0)
 

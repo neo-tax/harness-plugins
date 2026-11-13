@@ -28,6 +28,13 @@
 # NEO_TAX_AUDIT_PORT (8788).
 set -eu
 
+# Everything written under .dev is private: recorded telemetry carries the
+# engineer's email and account ids. Claude Code itself runs with the
+# engineer's own umask, so files it writes in their work tree are unaffected.
+# @spec: otlp-ingest#dev-stack-private
+user_umask=$(umask)
+umask 077
+
 repo=$(CDPATH="" cd -- "$(dirname -- "$0")/.." && pwd)
 dev="$repo/.dev"
 # Ports `up` chose are kept, so later commands need no environment.
@@ -94,6 +101,7 @@ up() {
   done
   need go; need jq; need curl; need claude
   mkdir -p "$dev/bin"
+  chmod 700 "$dev"
   echo "$port" >"$dev/port"
   echo "$audit_port" >"$dev/audit-port"
   if [ -f "$dev/config-dir" ]; then
@@ -190,6 +198,7 @@ run_claude() {
       OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer dev-ingest" \
       OTEL_LOGS_EXPORT_INTERVAL=1000 OTEL_METRIC_EXPORT_INTERVAL=5000
   fi
+  umask "$user_umask"
   exec claude "$@"
 }
 
@@ -227,6 +236,7 @@ capture() {
   conf=$(config_dir)
   [ -n "$conf" ] || die "capture runs only against the throwaway config, not --my-config"
   [ -f "$dev/duplicates.jsonl" ] || die "the running fake ingest does not record duplicates; run scripts/dev.sh down, then up"
+  chmod 700 "$dev"
   work="$dev/capture"
   mkdir -p "$work"
   [ -d "$work/.git" ] || git -C "$work" init -q
