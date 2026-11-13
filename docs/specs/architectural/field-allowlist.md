@@ -4,8 +4,8 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-10-24
-updated: 2026-10-25
-version: 1
+updated: 2026-11-13
+version: 2
 affects:
   - internal/allowlist/*.go
   - contract/types.go
@@ -31,7 +31,8 @@ Governs the single list of fields the agent is permitted to emit, how it is enfo
 - `content-bearing-payloads-reduced`(approved): A hook payload that carries model output is reduced to its usage counts inside the agent before any of it is written to disk.
 - `privacy-statement-generated`(tested): The published privacy statement's field table is generated from the allowlist in code, and CI fails when the committed statement differs from the generated one.
 - `statement-per-event-kind`(tested): The generated statement lists, per event kind, every field and a one-line description of what it contains.
-- `statement-names-identity-line`(tested): The statement states that the only personal identity sent is the email the engineer confirms at enrollment, plus the repository-level git email as a join signal.
+- `statement-names-identity-line`(tested): The statement names the two values meant to identify the engineer: the email the engineer confirms at enrollment and the repository-level git email as a join signal.
+- `statement-names-incidental-identity`(tested): The statement says plainly that `branch` is free text the engineer chooses and `repo.owner` can be a personal account name, so either can identify a person although neither is meant to.
 - `change-updates-this-spec`(built): Adding or removing a field from the allowlist updates the requirements of this spec in the same change.
   - status-reason: a process rule stated at the top of internal/allowlist/allowlist.go and enforced in review; no test can see the spec diff
 

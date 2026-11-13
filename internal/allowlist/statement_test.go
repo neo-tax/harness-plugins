@@ -84,11 +84,14 @@ func TestStatementListsNestedFieldsAtAnyDepth(t *testing.T) {
 }
 
 // @spec: field-allowlist#statement-names-identity-line
+// @spec: field-allowlist#statement-names-incidental-identity
 func TestStatementNamesIdentityLine(t *testing.T) {
 	s := allowlist.Statement()
 	for _, want := range []string{
-		"The only personal identity Neo.Tax receives is the email the engineer confirms at enrollment",
+		"Neo.Tax receives two values meant to identify the engineer: the email the engineer confirms at enrollment",
 		"repository-level git `user.email`",
+		"`branch` is free text the engineer or their tools choose",
+		"`repo.owner` is the account that owns the repository, which is a personal username",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("statement lacks %q", want)
