@@ -1,7 +1,9 @@
 package agent_test
 
 import (
+	"bytes"
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,5 +102,73 @@ func TestEmitPreservesNumbers(t *testing.T) {
 	b, _ := os.ReadFile(paths[0])
 	if !strings.Contains(string(b), "9007199254740993") {
 		t.Fatalf("number changed: %s", b)
+	}
+}
+
+// An allowed field carrying a value the contract forbids (here a path in
+// head_sha and conversation text in usage.source) never reaches the queue.
+// The refusal is counted by kind and logged by kind and failing keyword,
+// without the value.
+// @spec: field-allowlist#values-validated-before-queue
+func TestEmitDropsEventWhoseValuesBreakTheContract(t *testing.T) {
+	dir := t.TempDir()
+	a := agent.New(dir)
+	var logs bytes.Buffer
+	a.Log = log.New(&logs, "", 0)
+	env := contract.Envelope{ContractVersion: contract.Version, DeviceID: "d", Harness: "claude-code", AgentVersion: "v", SessionID: "s", SentAt: time.Now()}
+	path := "/Users/alice/acme/billing.go"
+	pattern := contract.NewTurn(env, contract.TurnFields{MessageID: "m1", Timestamp: time.Now(), HeadSHA: &path, Usage: contract.Usage{Source: contract.UsageSourceUnknown}})
+	enum := contract.NewTurn(env, contract.TurnFields{MessageID: "m2", Timestamp: time.Now(), Usage: contract.Usage{Source: "Fix the Acme billing bug"}})
+	valid := contract.NewClosed(env, contract.ClosedFields{EndedAt: time.Now()})
+	if err := a.Emit(pattern, enum, valid); err != nil {
+		t.Fatal(err)
+	}
+	got := queued(t, dir)
+	if len(got) != 1 || got[0]["event_kind"] != contract.KindClosed {
+		t.Fatalf("queued %v", got)
+	}
+	if n := queue.New(dir).State().InvalidEvents[contract.KindTurn]; n != 2 {
+		t.Errorf("invalid session.turn counted %d, want 2", n)
+	}
+	out := logs.String()
+	if strings.Count(out, "\n") != 2 {
+		t.Errorf("want one log line per refused event, got %q", out)
+	}
+	for _, want := range []string{"session.turn", "pattern at /head_sha", "enum at /usage/source"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log %q lacks %q", out, want)
+		}
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "state.json"))
+	for _, leak := range []string{"alice", "acme", "Acme"} {
+		if strings.Contains(out, leak) {
+			t.Errorf("log carries a value: %q", out)
+		}
+		if strings.Contains(string(raw), leak) {
+			t.Errorf("diagnostics carry a value: %s", raw)
+		}
+	}
+}
+
+// An event emitted before the device has enrolled has no device id yet; it
+// still queues, unchanged.
+// @spec: field-allowlist#values-validated-before-queue
+func TestEmitQueuesPreEnrollmentEvent(t *testing.T) {
+	dir := t.TempDir()
+	a := agent.New(dir)
+	ev := contract.NewClosed(contract.Envelope{ContractVersion: contract.Version, Harness: "claude-code", AgentVersion: "v", SessionID: "s", SentAt: time.Now()},
+		contract.ClosedFields{EndedAt: time.Now()})
+	if err := a.Emit(ev); err != nil {
+		t.Fatal(err)
+	}
+	got := queued(t, dir)
+	if len(got) != 1 {
+		t.Fatalf("queued %d", len(got))
+	}
+	if got[0]["device_id"] != "" {
+		t.Errorf("device_id changed to %v", got[0]["device_id"])
+	}
+	if st := queue.New(dir).State(); len(st.InvalidEvents) != 0 {
+		t.Errorf("pre-enrollment event counted invalid: %v", st.InvalidEvents)
 	}
 }

@@ -79,6 +79,7 @@ type State struct {
 	NeedsEnrollment bool             `json:"needs_enrollment,omitempty"`
 	DroppedEvents   int64            `json:"dropped_events,omitempty"`
 	DroppedFields   map[string]int64 `json:"dropped_fields,omitempty"`
+	InvalidEvents   map[string]int64 `json:"invalid_events,omitempty"`
 }
 
 func (q *Queue) queueDir() string { return filepath.Join(q.Dir, "queue") }
@@ -112,6 +113,9 @@ func (q *Queue) readState() State {
 	}
 	if st.DroppedFields == nil {
 		st.DroppedFields = map[string]int64{}
+	}
+	if st.InvalidEvents == nil {
+		st.InvalidEvents = map[string]int64{}
 	}
 	return st
 }
@@ -248,6 +252,24 @@ func (q *Queue) RecordDroppedFields(names []string) error {
 	return q.withState(func(st *State) error {
 		for _, n := range names {
 			st.DroppedFields[n]++
+		}
+		return nil
+	})
+}
+
+// RecordInvalidEvents counts, by event kind, events the agent refused to
+// queue because their values do not match the wire contract, in the agent's
+// local diagnostics. It is kept apart from DroppedEvents, which counts events
+// the cap discarded and is reported on the wire as dropped_events.
+//
+// @spec: field-allowlist#values-validated-before-queue
+func (q *Queue) RecordInvalidEvents(kinds []string) error {
+	if len(kinds) == 0 {
+		return nil
+	}
+	return q.withState(func(st *State) error {
+		for _, k := range kinds {
+			st.InvalidEvents[k]++
 		}
 		return nil
 	})
