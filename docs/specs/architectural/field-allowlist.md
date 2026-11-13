@@ -38,7 +38,7 @@ Governs the single list of fields the agent is permitted to emit, how it is enfo
 - `privacy-statement-generated`(tested): The published privacy statement's field table is generated from the allowlist in code, and CI fails when the committed statement differs from the generated one.
 - `statement-per-event-kind`(tested): The generated statement lists, per event kind, every field and a one-line description of what it contains.
 - `statement-names-identity-line`(tested): The statement names the two values meant to identify the engineer: the email the engineer confirms at enrollment and the repository-level git email as a join signal.
-- `statement-names-incidental-identity`(tested): The statement says plainly that `branch` is free text the engineer chooses and `repo.owner` can be a personal account name, so either can identify a person although neither is meant to.
+- `statement-names-incidental-identity`(tested): The statement says plainly that `branch` is free text the engineer chooses and `repo.owner` can be a personal account name, and that the device hostname sent at enrollment often contains the engineer's name, so each can identify a person although none is meant to.
 - `statement-covers-enrollment`(tested): The generated statement has an "At enrollment" section, generated from the enrollment request in the wire contract, that lists every field the request carries with a one-line description and says it is sent once per enrollment or re-enrollment.
 - `change-updates-this-spec`(built): Adding or removing a field from the allowlist updates the requirements of this spec in the same change.
   - status-reason: a process rule stated at the top of internal/allowlist/allowlist.go and enforced in review; no test can see the spec diff
