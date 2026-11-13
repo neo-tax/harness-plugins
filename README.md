@@ -30,7 +30,7 @@ go run ./cmd/privacy-statement      # the privacy statement, generated from the 
 2. The harness's lifecycle hooks exec the agent with the hook name on the command line and the harness payload on stdin. The agent reads the session transcript from its last cursor and emits one event per assistant turn: token usage by cache tier, model, repository, branch, and head commit.
 3. Events pass through the allowlist, queue to disk, and flush in batches. Neo.Tax joins each session to a pull request by repository and branch, then to a ticket through its existing PR links, and prices each turn.
 
-No prompt text, completion text, tool inputs, file paths, working-directory paths, or session titles ever leave the machine. The published privacy statement is generated from the allowlist in the agent, so the two cannot drift.
+No session event the agent sends carries prompt text, completion text, tool inputs, file paths, working-directory paths, or session titles. The published privacy statement is generated from the allowlist in the agent, so the two cannot drift. With telemetry enabled, Claude Code's own exporter also sends its usage telemetry to Neo.Tax directly, without passing through the agent; `docs/specs/architectural/otlp-ingest.md` governs what that path keeps.
 
 ## Reading this repository
 

@@ -4,8 +4,8 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-11-02
-updated: 2026-11-11
-version: 6
+updated: 2026-11-13
+version: 7
 affects:
 ---
 
@@ -55,9 +55,11 @@ v0.1 takes Claude Code's own export, sent directly by managed settings: logs and
 
 - `server-allowlist`(approved): Of each log record the endpoint keeps only the attributes its source's mapping names: model, token counts, estimated cost, event timestamp, session id, call ids, user email, and repo; no other attribute, resource attribute, or record body is stored.
 - `metric-allowlist`(approved): Of each metric data point the endpoint keeps only the metric name, its value, its start and end times, and the attributes its source's mapping names: for Claude Code, `session.id`, `user.email`, `model`, `type`, `query_source`, and the repo attributes; no other attribute (including agent, skill, plugin, and MCP server names), resource attribute, or exemplar is stored.
-- `content-never-stored`(approved): Prompt text, response text, tool inputs and outputs, commands, file paths, and API bodies are dropped even when the sending harness is configured to export them.
+- `content-never-stored`(approved): Prompt text, response text, tool inputs and outputs, commands, file paths, MCP server, tool, and skill names, and API bodies are dropped before anything is stored or logged, whether they arrive as an attribute, a resource attribute, or a record body, and even when the sending harness is configured to export them.
+- `managed-settings-no-content`(approved): The managed settings Neo.Tax ships to turn on Claude Code's export never enable `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_ASSISTANT_RESPONSES`, `OTEL_LOG_TOOL_DETAILS`, `OTEL_LOG_TOOL_CONTENT`, or `OTEL_LOG_RAW_API_BODIES`, so Claude Code redacts content before it leaves the machine.
 - `allowlist-before-write`(approved): The allowlist is applied before any part of a record is written to storage or to a log line.
 - `engineer-from-user-email`(approved): A telemetry-only turn's engineer, and a metric data point's, is its `user.email`, resolved to a contributor the same way a device's confirmed email is; a turn without `user.email` is stored with no engineer.
+- `privacy-statement-covers-telemetry`(approved): The published privacy statement covers this path as well as the agent's: it lists, per source, the log and metric attributes the endpoint keeps, and says that content is dropped as `content-never-stored` describes.
 - `estimated-cost-labeled`(approved): A telemetry turn's cost is stored as the harness's own estimate, distinct from list-price, billed, or invoiced cost.
 
 ### Joining with the plugin's turns
@@ -102,7 +104,7 @@ v1.0 takes what a gateway or a customer's own OpenTelemetry Collector sends: pro
 
 OTLP is the entry point because it is what keeps a capture path swappable. Nearly every gateway and observability stack exports it, and Claude Code exports it natively as a supported interface, unlike the transcript the plugin parses. It also reaches places the plugin does not load: managed settings turn it on in Claude Code's cloud sessions, which have no laptop and no hooks. OTLP fixes the transport, not the attribute names, and the GenAI semantic conventions are still experimental, so each source needs its own mapping onto the session record. Adding a source means adding a mapping, not building another endpoint.
 
-The plugin's allowlist runs on the engineer's machine, so it says nothing about what arrives here: the customer's admin configures the exporter, and an exporter can be told to send prompts, tool inputs, and whole API bodies. The server therefore enforces its own allowlist, named by the mapping, and drops the rest before anything is written. A customer who turns on prompt logging for their own collector sends us nothing more than one who does not.
+The plugin's allowlist runs on the engineer's machine, so it says nothing about what arrives here: the customer's admin configures the exporter, and an exporter can be told to send prompts, tool inputs, and whole API bodies. The server therefore enforces its own allowlist, named by the mapping, and drops the rest before anything is written. A customer who turns on prompt logging for their own collector sends us nothing more than one who does not. The managed settings Neo.Tax ships leave Claude Code's content switches off, so on that configuration content does not leave the machine at all, and the server's drop covers an admin who turns them on.
 
 The credential is per organization, not per device, because an exporter is configured once for a fleet through managed settings and cannot run enrollment. A static header is the only credential every exporter supports. Managed settings cache it on every machine, which is acceptable only because the key can do nothing but write telemetry into its own organization and can be revoked without touching anything else. One key per destination (dogfood telemetry, a gateway, a customer's own collector) lets one leak be revoked alone.
 
@@ -153,4 +155,4 @@ A capture on 2026-11-11 (Claude Code 2.1.322, `scripts/dev.sh` against the fake 
 - Whether a session's metrics name the same session id as its logs on a cloud session, where Claude Code also sends `ccr.session.id`.
 - Whether `claude_code.code_edit_tool.decision` (edits accepted and rejected) is worth keeping as a measure of how much of an agent's output an engineer used.
 - Whether a metric session with no turns from either path happens often enough to approve `metric-usage-fallback`.
-- Whether the privacy statement should describe this path, since what telemetry sends is set by the customer's admin, not by the plugin.
+- Whether the privacy statement's telemetry section is generated from the endpoint's mappings, as the agent's section is generated from the field allowlist, given that the mappings live in Neo.Tax's server rather than in this repo.

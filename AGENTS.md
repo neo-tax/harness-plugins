@@ -22,7 +22,7 @@ Code that runs on an engineer's machine to observe AI coding sessions and report
 - The wire contract is the JSON Schema under `contract/`. Go types are written to match it; the contract test proves they do. A schema change is a change here first.
 - The field allowlist in the agent is the privacy statement. Every event field an adapter emits passes through it, and the published statement is generated from it.
 - GitHub Actions use snake_case, never kebab-case: workflow file names, job ids, step ids, and concurrency groups (`.github/workflows/claude_code_review.yml`, job `claude_review`).
-- Events carry a device id and session metadata only. Prompt text, completion text, tool inputs, file paths, the working-directory path, and session titles never reach an event, a queue file, or a log line.
+- Session events carry a device id and session metadata only. Prompt text, completion text, tool inputs, file paths, the working-directory path, and session titles never reach a session event, a queue file, or a log line. With telemetry enabled, Claude Code's own exporter sends its usage telemetry to Neo.Tax directly, bypassing the agent; `docs/specs/architectural/otlp-ingest.md` governs what that path keeps.
 
 ## Harness boundary
 
