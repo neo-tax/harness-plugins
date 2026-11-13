@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -26,4 +27,13 @@ func Logf(dataDir, format string, args ...any) {
 	}
 	defer f.Close()
 	fmt.Fprintf(f, "%s %s\n", time.Now().UTC().Format(time.RFC3339), fmt.Sprintf(format, args...))
+}
+
+// logFile is an io.Writer over agent.log, so a log.Logger can write there.
+// A hook's stderr is not a place anyone reads.
+type logFile string
+
+func (d logFile) Write(p []byte) (int, error) {
+	Logf(string(d), "%s", strings.TrimRight(string(p), "\n"))
+	return len(p), nil
 }
