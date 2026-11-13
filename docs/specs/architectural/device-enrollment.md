@@ -4,7 +4,7 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-10-24
-updated: 2026-10-25
+updated: 2026-11-13
 version: 1
 affects:
   - internal/queue/*.go
@@ -50,6 +50,8 @@ The harness account email is offered as a candidate because it is the identity t
 A harness model runs the login command without a terminal, so the agent cannot prompt there. When the token or email is missing and standard input is not a terminal, the agent writes exactly what it needs (and the candidate emails) and exits with status 3; the model relays the question and runs the command again with `--token` and `--email`. On a terminal the agent prompts directly. Either way the prompting is the agent's; the skill only says to run the command and follow its output.
 
 Every enrollment mints a new device id, so the agent stamps `device_id` on each event when it is sent rather than trusting the id written when it was queued; events queued while a rejected device waited for re-enrollment are then delivered as the newly enrolled device instead of being rejected.
+
+The enrollment request keeps the machine's hostname, unhashed, as a human-readable label for the device id so engineers can tell their devices apart; it is read once at enrollment and goes stale if the machine is renamed, which is acceptable.
 
 Under the later WorkOS path the same enrollment response is produced from a verified user claim instead of a pasted token; the agent's storage and rejection behavior do not change.
 
