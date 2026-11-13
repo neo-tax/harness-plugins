@@ -43,11 +43,114 @@ func TestParseRemoteURL(t *testing.T) {
 		"git@github-work:Neo-Tax/Repo.git":                                     {Host: "github-work", Owner: "neo-tax", Name: "repo"},
 		"https://github.com/onlyowner":                                         nil,
 		"":                                                                     nil,
+		"git@github.com:Neo-Tax/Harness-Plugins.GIT":                           gh,
+		"https://gitlab.com/a/b/c/d/repo.git":                                  {Host: "gitlab.com", Owner: "a/b/c/d", Name: "repo"},
+		"ssh://git@git.example.com:7999/team/repo.git":                         {Host: "git.example.com", Owner: "team", Name: "repo"},
+		"https://git.example.com:8443/team/repo.git":                           {Host: "git.example.com", Owner: "team", Name: "repo"},
 	}
 	for url, want := range cases {
 		got := gitident.ParseRemoteURL(url)
 		if (got == nil) != (want == nil) || (got != nil && *got != *want) {
 			t.Errorf("%q: got %+v, want %+v", url, got, want)
+		}
+	}
+}
+
+// Remotes that name a local path, a remote-helper transport, or a component
+// outside the conservative charset have no repo, and credentials never reach
+// any field, whether the result is a repo or null.
+// @spec: repo-and-branch-identity#repo-null-when-unsafe
+func TestParseRemoteURLUnsafe(t *testing.T) {
+	gh := &contract.Repo{Host: "github.com", Owner: "owner", Name: "repo"}
+	cases := []struct {
+		url  string
+		want *contract.Repo
+	}{
+		// Remote-helper transports and local paths.
+		{"gcrypt::/Users/alice/Dropbox/acme-client", nil},
+		{"gcrypt::git@github.com:owner/repo.git", nil},
+		{"persistent-https::https://github.com/owner/repo", nil},
+		{"file:///home/alice/repo.git", nil},
+		{"/home/alice/clients/acme", nil},
+		{"./acme", nil},
+		// scp-style absolute paths on another machine.
+		{"buildbox:/home/alice/clients/acme", nil},
+		{"alice@buildbox:/home/alice/clients/acme.git", nil},
+		{"buildbox:~alice/acme", nil},
+		// Credentials in the authority.
+		{"https://x-access-token:ghp_SECRET@github.com/owner/repo.git", gh},
+		{"https://ghp_SECRET@github.com/owner/repo.git", gh},
+		{"x-access-token:ghp_SECRET@github.com:owner/repo.git", gh},
+		{"x-access-token:ghp_SECRET@github.com/owner/repo.git", nil},
+		{"https://tok/en@github.com/owner/repo.git", nil},
+		// Case and .git.
+		{"https://github.com/Owner/R.GIT", &contract.Repo{Host: "github.com", Owner: "owner", Name: "r"}},
+		// Percent escapes, dot segments, and empty segments.
+		{"https://github.com/%2e%2e/repo", nil},
+		{"https://github.com/owner/%2e%2e", nil},
+		{"https://github.com/owner/my%20repo", nil},
+		{"https://github.com/../repo", nil},
+		{"git@github.com:../repo.git", nil},
+		{"git@github.com:owner/..", nil},
+		{"git@github.com:./repo", nil},
+		{"https://github.com/a//repo", nil},
+		{"git@github.com:a//repo", nil},
+		{"git@github.com:owner/.git", nil},
+		// Characters outside the charset.
+		{`git@github.com:o/r.git" # work`, nil},
+		{"git@github.com:o/r name", nil},
+		{"git@github.com:o:x/repo", nil},
+		{"ssh://git@[::1]:22/owner/repo", nil},
+		{"https://github.com/owner/repo?token=x", gh},
+		{"https://github.com/owner/repo#frag", gh},
+	}
+	for _, c := range cases {
+		got := gitident.ParseRemoteURL(c.url)
+		if (got == nil) != (c.want == nil) || (got != nil && *got != *c.want) {
+			t.Errorf("%q: got %+v, want %+v", c.url, got, c.want)
+		}
+		if got != nil {
+			for _, f := range []string{got.Host, got.Owner, got.Name} {
+				if strings.Contains(strings.ToLower(f), "secret") || strings.Contains(f, "x-access-token") {
+					t.Errorf("%q: credential reached %+v", c.url, got)
+				}
+			}
+		}
+	}
+}
+
+// A remote URL is read from the config as git reads it: quotes and escapes
+// are resolved and a trailing comment is dropped, so comment text never
+// becomes part of the repo.
+// @spec: repo-and-branch-identity#repo-null-when-unsafe
+func TestConfigValueComments(t *testing.T) {
+	want := contract.Repo{Host: "github.com", Owner: "o", Name: "r"}
+	for _, line := range []string{
+		`url = "git@github.com:o/r.git" # work`,
+		`url = "git@github.com:o/r.git" ; work`,
+		`url = "git@github.com:o/r.git"`,
+		`url = git@github.com:o/r.git # work`,
+		`url = git@github.com:o/r.git;work`,
+		`url = git@github.com:o/r.git   `,
+		`url = "git@github.com:o/r#x.git" # work`,
+		`url="git@github.com:o/\"r.git"`,
+	} {
+		dir := newRepo(t)
+		cfg := filepath.Join(dir, ".git", "config")
+		f, err := os.OpenFile(cfg, os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.WriteString("[remote \"origin\"]\n\t" + line + "\n")
+		f.Close()
+		got := gitident.Identify(dir).Repo
+		switch {
+		case strings.Contains(line, "#x") || strings.Contains(line, `\"`):
+			if got != nil { // the quoted '#' or '"' is part of the URL, which then fails validation
+				t.Errorf("%s: got %+v, want nil", line, got)
+			}
+		case got == nil || *got != want:
+			t.Errorf("%s: got %+v, want %+v", line, got, want)
 		}
 	}
 }

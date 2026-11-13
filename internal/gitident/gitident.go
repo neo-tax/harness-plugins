@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -203,57 +204,139 @@ func readConfig(path string) gitConfig {
 	return cfg
 }
 
+// unquote parses a git config value as git does: double-quoted spans are
+// taken literally apart from backslash escapes, an unquoted '#' or ';' starts
+// a comment, and whitespace outside quotes at either end is dropped. Comment
+// text therefore never becomes part of a value.
+//
+// @spec: repo-and-branch-identity#repo-null-when-unsafe
 func unquote(v string) string {
-	if i := strings.IndexAny(v, "#;"); i >= 0 && !strings.Contains(v[:i], `"`) {
-		v = strings.TrimSpace(v[:i])
+	var b strings.Builder
+	quoted := false
+	end := 0 // length of b up to the last byte that was quoted or not whitespace
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		switch {
+		case c == '"':
+			quoted = !quoted
+			end = b.Len()
+			continue
+		case !quoted && (c == '#' || c == ';'):
+			return b.String()[:end]
+		case c == '\\' && i+1 < len(v):
+			i++
+			switch v[i] {
+			case 'n':
+				c = '\n'
+			case 't':
+				c = '\t'
+			case 'b':
+				c = '\b'
+			default:
+				c = v[i]
+			}
+			b.WriteByte(c)
+			end = b.Len()
+			continue
+		}
+		if !quoted && (c == ' ' || c == '\t') && b.Len() == 0 {
+			continue
+		}
+		b.WriteByte(c)
+		if quoted || (c != ' ' && c != '\t') {
+			end = b.Len()
+		}
 	}
-	if len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"' {
-		v = v[1 : len(v)-1]
-	}
-	return v
+	return b.String()[:end]
 }
 
 // ParseRemoteURL parses an SSH, scp-style, HTTPS, or git:// remote URL into a
 // lowercased host, owner, and name, stripping credentials, ports, and a
 // trailing .git. Owner is every path segment before the name, so nested
-// groups are kept. Local paths and file:// URLs have no repository identity
-// and return nil.
+// groups are kept. Local paths, file:// URLs, scp-style absolute paths, and
+// remote-helper transports (<transport>::<address>) have no repository
+// identity and return nil, as does any result that fails validRepo: a remote
+// is either reported whole and clean or not at all.
 //
 // @spec: repo-and-branch-identity#repo-from-remote-url
 // @spec: repo-and-branch-identity#repo-lowercased
 // @spec: repo-and-branch-identity#host-preserved
+// @spec: repo-and-branch-identity#repo-null-when-unsafe
 func ParseRemoteURL(raw string) *contract.Repo {
 	raw = strings.TrimSpace(raw)
+	if remoteHelper.MatchString(raw) {
+		return nil
+	}
 	var host, path string
 	if strings.Contains(raw, "://") {
 		u, err := url.Parse(raw)
 		if err != nil || u.Scheme == "file" {
 			return nil
 		}
-		host, path = u.Hostname(), u.Path
+		// Hostname excludes userinfo and port. EscapedPath keeps percent
+		// escapes, which validRepo rejects, so %2e%2e cannot become "..".
+		host, path = u.Hostname(), strings.Trim(u.EscapedPath(), "/")
 	} else {
-		// scp-style: [user@]host:path
-		colon := strings.IndexByte(raw, ':')
-		if colon < 0 || strings.ContainsAny(raw[:colon], "/\\") || colon == 1 { // colon == 1: a Windows drive letter
+		// scp-style: [userinfo@]host:path. Userinfo ends at the last '@'
+		// before the first '/', and may itself contain ':' (user:token@host).
+		rest := raw
+		slash := strings.IndexByte(rest, '/')
+		if slash < 0 {
+			slash = len(rest)
+		}
+		if at := strings.LastIndexByte(rest[:slash], '@'); at >= 0 {
+			rest = rest[at+1:]
+		}
+		colon := strings.IndexByte(rest, ':')
+		if colon < 0 || strings.ContainsAny(rest[:colon], "/\\") || colon == 1 { // colon == 1: a Windows drive letter
 			return nil
 		}
-		host = raw[:colon]
-		if at := strings.LastIndexByte(host, '@'); at >= 0 {
-			host = host[at+1:]
+		host, path = rest[:colon], rest[colon+1:]
+		if strings.HasPrefix(path, "/") { // an absolute path on the remote machine
+			return nil
 		}
-		path = raw[colon+1:]
+		path = strings.TrimSuffix(path, "/")
 	}
-	path = strings.TrimSuffix(strings.Trim(path, "/"), ".git")
-	segments := strings.Split(path, "/")
-	if host == "" || len(segments) < 2 {
+	// Lowercase first so that .GIT is stripped like .git.
+	host, path = strings.ToLower(host), strings.ToLower(path)
+	path = strings.TrimSuffix(path, ".git")
+	i := strings.LastIndexByte(path, '/')
+	if i < 0 {
 		return nil
 	}
-	name := segments[len(segments)-1]
-	owner := strings.Join(segments[:len(segments)-1], "/")
-	if name == "" || owner == "" {
+	repo := &contract.Repo{Host: host, Owner: path[:i], Name: path[i+1:]}
+	if !validRepo(repo) {
 		return nil
 	}
-	return &contract.Repo{Host: strings.ToLower(host), Owner: strings.ToLower(owner), Name: strings.ToLower(name)}
+	return repo
+}
+
+// remoteHelper matches git's <transport>::<address> syntax.
+var remoteHelper = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9+.-]*::`)
+
+// segment is one host label run, owner segment, or name: a conservative
+// charset with no ':', '@', '%', '/', whitespace, or quotes.
+var segment = regexp.MustCompile(`^[a-z0-9._-]+$`)
+
+// validRepo reports whether every component is non-empty, drawn from the
+// conservative charset, and free of "." and ".." segments. Owner may be several
+// segments joined by '/', for nested groups.
+//
+// @spec: repo-and-branch-identity#repo-null-when-unsafe
+func validRepo(r *contract.Repo) bool {
+	if !segment.MatchString(r.Host) || !validSegment(r.Name) {
+		return false
+	}
+	for _, s := range strings.Split(r.Owner, "/") {
+		if !validSegment(s) {
+			return false
+		}
+	}
+	return true
+}
+
+func validSegment(s string) bool {
+	return segment.MatchString(s) && s != "." && s != ".."
 }
 
 func withoutEnv(env []string, names ...string) []string {
