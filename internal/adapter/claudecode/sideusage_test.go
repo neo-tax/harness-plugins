@@ -293,6 +293,41 @@ func TestSessionEndUnsplitTotalCoveredByTurns(t *testing.T) {
 	}
 }
 
+// Claude Code can name a model in its totals with a bracketed suffix the
+// API's response, and so the turn, does not carry; the turns still come off
+// those totals, under the name without the suffix.
+// @spec: claude-code-transcript-parser#side-usage-model-join
+func TestSessionEndJoinsTotalsToTurnsAcrossAModelSuffix(t *testing.T) {
+	h := newHookEnv(t, true)
+	h.appendLines(costState(1, map[string]map[string]int64{
+		"claude-opus-5-5[1m]": {"inputTokens": 110, "outputTokens": 20, "cacheReadInputTokens": 4000,
+			"cacheCreationInputTokens": 300, "cacheCreationEphemeral5mInputTokens": 100, "cacheCreationEphemeral1hInputTokens": 200},
+		"claude-haiku-5-5": {"inputTokens": 5, "outputTokens": 6, "cacheReadInputTokens": 7},
+	}))
+	h.run("SessionEnd", map[string]any{"reason": "other"})
+	want := []any{entry("claude-opus-5-5", 100, 0, 0, 0, 0)}
+	if got := h.closed()["side_usage"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("side_usage %v, want %v", got, want)
+	}
+}
+
+// Totals and turns that name one model differently in a way the join does
+// not know leave side usage unknown, rather than reporting the turns' usage
+// as side calls.
+// @spec: claude-code-transcript-parser#side-usage-model-join
+func TestSessionEndSideUsageNullWhenModelsDoNotJoin(t *testing.T) {
+	h := newHookEnv(t, true)
+	h.appendLines(costState(1, map[string]map[string]int64{
+		"us.anthropic.claude-opus-5-5-v1:0": {"inputTokens": 110, "outputTokens": 20},
+		"claude-haiku-5-5":                  {"inputTokens": 5, "outputTokens": 6, "cacheReadInputTokens": 7},
+		"claude-sonnet-5-5":                 {"inputTokens": 1, "outputTokens": 2, "cacheReadInputTokens": 4, "cacheCreationInputTokens": 3},
+	}))
+	h.run("SessionEnd", map[string]any{"reason": "other"})
+	if v, ok := h.closed()["side_usage"]; !ok || v != nil {
+		t.Fatalf("side_usage %v (present %v), want null", v, ok)
+	}
+}
+
 func setCostStateWait(d time.Duration) func() {
 	old := claudecode.CostStateWait
 	claudecode.CostStateWait = d

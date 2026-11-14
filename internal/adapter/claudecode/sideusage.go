@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/neo-tax/harness-plugins/contract"
@@ -187,7 +188,11 @@ func sideUsage(ctx Context, mainPath, reason string) ([]contract.SideUsage, erro
 	if err != nil || !scan.current {
 		return nil, err
 	}
-	totals := scan.totals()
+	totals := map[string]modelTotals{}
+	for model, t := range scan.totals() {
+		k := modelKey(model)
+		totals[k] = totals[k].add(t)
+	}
 	res, _, err := tailWith(ctx, mainPath, nil)
 	if err != nil {
 		return nil, err
@@ -198,7 +203,11 @@ func sideUsage(ctx Context, mainPath, reason string) ([]contract.SideUsage, erro
 		if !ok || t.Model == nil {
 			continue
 		}
-		turns[*t.Model] = add(turns[*t.Model], turnCounts(t.Usage))
+		k := modelKey(*t.Model)
+		turns[k] = add(turns[k], turnCounts(t.Usage))
+	}
+	if !joined(totals, turns) {
+		return nil, nil
 	}
 	out := []contract.SideUsage{}
 	for model, total := range totals {
@@ -210,6 +219,45 @@ func sideUsage(ctx Context, mainPath, reason string) ([]contract.SideUsage, erro
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Model < out[j].Model })
 	return out, nil
+}
+
+// modelKey is a model name without a trailing bracketed suffix. Claude Code
+// can name a model it was configured with that way (claude-opus-5[1m]) in its
+// totals, while the API's response, which a turn records, names the model
+// without it.
+//
+// @spec: claude-code-transcript-parser#side-usage-model-join
+func modelKey(model string) string {
+	if i := strings.LastIndexByte(model, '['); i > 0 && strings.HasSuffix(model, "]") {
+		return model[:i]
+	}
+	return model
+}
+
+// joined reports whether every turn's usage has totals to come off. A turn
+// model with usage but no totals, while some totals model has no turns,
+// means the two name one model differently: subtracting nothing from those
+// totals would report the turns as side usage. A totals model with no turns
+// alone is ordinary (side calls on a model the engineer never chose), and so
+// is a turn model with no totals alone (nothing to over-report).
+//
+// @spec: claude-code-transcript-parser#side-usage-model-join
+func joined(totals map[string]modelTotals, turns map[string]contract.SideUsage) bool {
+	turnOnly := false
+	for model, u := range turns {
+		if _, ok := totals[model]; !ok && u != (contract.SideUsage{}) {
+			turnOnly = true
+		}
+	}
+	if !turnOnly {
+		return true
+	}
+	for model := range totals {
+		if _, ok := turns[model]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func add(a, b contract.SideUsage) contract.SideUsage {

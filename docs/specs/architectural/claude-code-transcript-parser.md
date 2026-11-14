@@ -4,8 +4,8 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-10-24
-updated: 2026-11-13
-version: 4
+updated: 2026-11-14
+version: 5
 affects:
   - internal/adapter/claudecode/*.go
   - internal/cursor/*.go
@@ -35,6 +35,7 @@ Governs how the Claude Code adapter turns hook payloads and on-disk transcripts 
 - `closed-on-session-end`(tested): `SessionEnd` produces one `session.closed` event with the harness's end reason.
 - `session-totals-from-cost-state`(tested): The session's totals are read from the main transcript's `cost-state` lines: per model, the latest line of each process's tally (lines sharing a `startTime`), summed across tallies.
 - `side-usage-is-totals-minus-turns`(tested): `side_usage` is, per model and per count, the session's totals less the usage of every turn of the session (main thread and subagents, each message counted once), clamped at zero, with models whose counts are all zero left out.
+- `side-usage-model-join`(tested): Totals and turns are matched by model name with any trailing bracketed suffix removed (Claude Code may write `claude-opus-5[1m]` in its totals where the turn records `claude-opus-5`), and `side_usage` names the model without it. When a turn model with usage still has no totals while some totals model has no turns, the two name a model differently in an unknown way, and `side_usage` is null rather than reporting those turns as side calls.
 - `side-usage-null-without-totals`(tested): `side_usage` is null when, after a bounded wait at a `SessionEnd` whose reason is an exit (`prompt_input_exit` or `other`), or at once for any other reason, the main transcript's latest `cost-state` line is followed by a user or assistant line, since such totals are an older process's (a resumed session's earlier exit) and would leave out what happened since. Other line types after it, which Claude Code writes as bookkeeping after exiting and adds to between versions, do not make the totals stale.
 - `side-usage-cache-split`(tested): Session totals split cache creation into five-minute and one-hour counts as the `cost-state` line reports them. Where a `cost-state` line does not split it (Claude Code through 2.1.310), the turns' cache writes of both tiers are subtracted from the unsplit amount, after the split amounts of the same tier, and what remains is reported as `cache_write_5m`, as an unsplit turn's writes are.
 - `branch-per-turn`(tested): A turn's `branch` is the transcript's recorded branch for that message when present, else the branch read from the working directory at hook time.
