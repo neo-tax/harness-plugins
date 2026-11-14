@@ -42,6 +42,8 @@ The code that runs on an engineer's machine to observe AI coding sessions and re
 
 **Ingest key**: The organization-level credential a telemetry exporter or gateway presents to the OTLP endpoint; it authorizes OTLP ingest only and identifies no device or engineer. _Avoid_: device key, API key, OTLP token
 
+**Telemetry credential**: From v1.0, the short-lived credential the agent obtains with the device key and hands to Claude Code's telemetry exporter through `otelHeadersHelper`, so telemetry is attributed to that device. _Avoid_: OTEL token, device token
+
 **Wire contract**: The JSON Schema definitions of every request and response between the agent and Neo.Tax, owned by this repo and versioned by `contract_version`. _Avoid_: API, protocol, payload format
 
 **Cursor**: The agent's record, per transcript, of how far it has read and the last message it emitted, so each hook reads only the new tail.

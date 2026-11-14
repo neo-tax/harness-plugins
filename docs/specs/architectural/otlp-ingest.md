@@ -5,8 +5,9 @@ owner:
   - Firas Abuzaid
 created: 2026-11-02
 updated: 2026-11-13
-version: 7
+version: 8
 affects:
+  - deploy/claude-code/*
 ---
 
 # OTLP ingest
@@ -16,6 +17,11 @@ Governs Neo.Tax's second entry point into the session record: an OpenTelemetry (
 ## Requirements (v0.1)
 
 v0.1 takes Claude Code's own export, sent directly by managed settings: logs and metrics, OTLP/JSON, delta temporality, joined to the plugin's turns on the request id.
+
+### Exporter configuration
+
+- `managed-settings-exporter`(tested): The managed settings Neo.Tax ships to turn on Claude Code's export, kept in this repository as `deploy/claude-code/managed-settings.json`, set `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_LOGS_EXPORTER=otlp`, `OTEL_METRICS_EXPORTER=otlp`, `OTEL_EXPORTER_OTLP_ENDPOINT` to the base endpoint `https://api.neo.tax/otlp`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/json`, `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta`, `OTEL_METRICS_INCLUDE_REPOSITORY=true`, and `OTEL_EXPORTER_OTLP_HEADERS` carrying the ingest key as a bearer token, and set no per-signal exporter variable that would override them.
+- `exporter-minimum-version`(approved): The telemetry path supports Claude Code 2.1.269 and later, the first version that sends repository attributes; an older Claude Code's telemetry-only turns have a null repo.
 
 ### Transport and authentication
 
@@ -56,9 +62,10 @@ v0.1 takes Claude Code's own export, sent directly by managed settings: logs and
 - `server-allowlist`(approved): Of each log record the endpoint keeps only the attributes its source's mapping names: model, token counts, estimated cost, event timestamp, session id, call ids, user email, and repo; no other attribute, resource attribute, or record body is stored.
 - `metric-allowlist`(approved): Of each metric data point the endpoint keeps only the metric name, its value, its start and end times, and the attributes its source's mapping names: for Claude Code, `session.id`, `user.email`, `model`, `type`, `query_source`, and the repo attributes; no other attribute (including agent, skill, plugin, and MCP server names), resource attribute, or exemplar is stored.
 - `content-never-stored`(approved): Prompt text, response text, tool inputs and outputs, commands, file paths, MCP server, tool, and skill names, and API bodies are dropped before anything is stored or logged, whether they arrive as an attribute, a resource attribute, or a record body, and even when the sending harness is configured to export them.
-- `managed-settings-no-content`(approved): The managed settings Neo.Tax ships to turn on Claude Code's export never enable `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_ASSISTANT_RESPONSES`, `OTEL_LOG_TOOL_DETAILS`, `OTEL_LOG_TOOL_CONTENT`, or `OTEL_LOG_RAW_API_BODIES`, so Claude Code redacts content before it leaves the machine.
+- `managed-settings-no-content`(tested): The managed settings Neo.Tax ships to turn on Claude Code's export never enable `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_ASSISTANT_RESPONSES`, `OTEL_LOG_TOOL_DETAILS`, `OTEL_LOG_TOOL_CONTENT`, or `OTEL_LOG_RAW_API_BODIES`, so Claude Code redacts content before it leaves the machine.
 - `allowlist-before-write`(approved): The allowlist is applied before any part of a record is written to storage or to a log line.
 - `engineer-from-user-email`(approved): A telemetry-only turn's engineer, and a metric data point's, is its `user.email`, resolved to a contributor the same way a device's confirmed email is; a turn without `user.email` is stored with no engineer.
+- `telemetry-attribution-labeled`(approved): A telemetry-only turn, and a metric data point, records that its engineer comes from the exporter's `user.email`, which any holder of the ingest key can set, rather than from an enrolled device, so a report can tell the two apart.
 - `privacy-statement-covers-telemetry`(approved): The published privacy statement covers this path as well as the agent's: it lists, per source, the log and metric attributes the endpoint keeps, and says that content is dropped as `content-never-stored` describes.
 - `estimated-cost-labeled`(approved): A telemetry turn's cost is stored as the harness's own estimate, distinct from list-price, billed, or invoiced cost.
 
@@ -71,7 +78,8 @@ v0.1 takes Claude Code's own export, sent directly by managed settings: logs and
 - `one-turn-per-call-id`(approved): Plugin turns in one organization that share a call id are one turn: the first stored keeps its session, and later ones are counted as duplicates.
 - `join-key-recorded`(approved): A joined turn records the key that joined it (response id, request id, or fingerprint), so the join rate can be measured per source and per key.
 - `join-order-independent`(approved): A joined turn is the same whichever of its two paths arrives first.
-- `telemetry-wins-usage`(approved): A joined turn takes its token counts and cost from telemetry, and its model from telemetry when telemetry carries one, else from the plugin.
+- `telemetry-wins-usage`(approved): A joined turn takes its token counts and cost from telemetry, and its model from telemetry when telemetry carries one, else from the plugin, but only when the telemetry record's `user.email` resolves to the same engineer as the plugin turn's device.
+- `telemetry-engineer-mismatch`(approved): A joined turn whose telemetry `user.email` is missing or resolves to an engineer other than its device's keeps the plugin's usage and model, and records that its telemetry was set aside and why, so the rate can be watched per ingest key.
 - `plugin-wins-context`(approved): A joined turn takes its session, engineer, timestamp, repo, branch, head SHA, and subagent id from the plugin, its engineer being the one its device resolves to, and telemetry never sets them.
 - `plugin-wins-otherwise`(approved): Any field of a joined turn that both paths carry and no other requirement assigns comes from the plugin.
 - `pr-opened-plugin-only`(approved): A session's pull requests opened come only from the plugin's `session.pr_opened` events.
@@ -100,13 +108,25 @@ v1.0 takes what a gateway or a customer's own OpenTelemetry Collector sends: pro
 - `metric-without-session`(draft): A data point without `session.id`, sent when the exporter turns session ids off, is stored under its engineer and its time interval with no session.
 - `metric-usage-fallback`(draft): A session with metric usage and no turn from either path takes its usage from its metrics, labeled as metric-derived and never joined to a turn.
 
+From v1.0 Claude Code's export authenticates as the device that sent it, through the agent, instead of with the organization's static ingest key.
+
+- `device-bound-telemetry`(approved): The managed settings Neo.Tax ships set `otelHeadersHelper` to the agent's `otel-headers` command and carry no ingest key, so each machine's export authenticates with a telemetry credential bound to its device.
+- `otel-headers-command`(approved): The agent's `otel-headers` command prints a JSON object whose only member is an `Authorization` header holding a bearer telemetry credential, obtained by presenting the device key to Neo.Tax and reused from the plugin data directory while it has more than 30 minutes left; it prints nothing and exits non-zero when the device is not enrolled, needs re-enrollment, or cannot reach Neo.Tax and holds no unexpired credential.
+- `telemetry-credential-lifetime`(approved): A telemetry credential expires one hour after it is issued, longer than Claude Code's 29-minute helper interval, and revoking a device key revokes its telemetry credentials.
+- `telemetry-credential-scope`(approved): A telemetry credential authorizes OTLP ingest only, for its device's organization. The endpoint attributes every record accepted under it to its device's engineer, ignoring `user.email`, and the record wins a joined turn's usage only when the plugin turn came from the same device.
+- `ingest-key-for-sources-without-a-device`(approved): An ingest key is minted only for a source that cannot run the agent, such as a gateway or a customer's collector. Its records follow `telemetry-attribution-labeled` and never win a joined turn's usage.
+
 ## Design Notes
 
 OTLP is the entry point because it is what keeps a capture path swappable. Nearly every gateway and observability stack exports it, and Claude Code exports it natively as a supported interface, unlike the transcript the plugin parses. It also reaches places the plugin does not load: managed settings turn it on in Claude Code's cloud sessions, which have no laptop and no hooks. OTLP fixes the transport, not the attribute names, and the GenAI semantic conventions are still experimental, so each source needs its own mapping onto the session record. Adding a source means adding a mapping, not building another endpoint.
 
 The plugin's allowlist runs on the engineer's machine, so it says nothing about what arrives here: the customer's admin configures the exporter, and an exporter can be told to send prompts, tool inputs, and whole API bodies. The server therefore enforces its own allowlist, named by the mapping, and drops the rest before anything is written. A customer who turns on prompt logging for their own collector sends us nothing more than one who does not. The managed settings Neo.Tax ships leave Claude Code's content switches off, so on that configuration content does not leave the machine at all, and the server's drop covers an admin who turns them on.
 
-The credential is per organization, not per device, because an exporter is configured once for a fleet through managed settings and cannot run enrollment. A static header is the only credential every exporter supports. Managed settings cache it on every machine, which is acceptable only because the key can do nothing but write telemetry into its own organization and can be revoked without touching anything else. One key per destination (dogfood telemetry, a gateway, a customer's own collector) lets one leak be revoked alone.
+In v0.1 the credential is per organization, not per device, because an exporter is configured once for a fleet through managed settings and cannot run enrollment, and a static header is the one credential every OTLP exporter supports. Managed settings put it on every machine, so every engineer in the organization can read it. It can only write telemetry into its own organization and can be revoked without touching anything else, but within that organization it can claim any engineer's email and any session id. So in v0.1 telemetry overrides a plugin turn's usage only when both name the same engineer (`telemetry-wins-usage`), and telemetry-only attribution is labeled as such. One key per destination (dogfood telemetry, a gateway, a customer's own collector) lets one leak be revoked alone.
+
+Claude Code also supports `otelHeadersHelper`: a command, run at startup and every 29 minutes, whose printed JSON becomes the export's HTTP headers. It works only over HTTP, which v0.1 already requires. v1.0 points it at the agent, which trades the device key for a short-lived telemetry credential, so Claude Code's export is attributed to an enrolled device the way the plugin's events are, and the static key is left to sources with no agent. A device that is not enrolled then sends no telemetry until it is, since Claude Code exports nothing while the helper fails.
+
+The exporter settings are explicit because Claude Code's defaults do not match the endpoint. From 2.1.323 the default protocol is `http/protobuf`, which v0.1 answers with 415, a status the exporter does not retry, so every record would be lost without notice. Repository attributes are off unless `OTEL_METRICS_INCLUDE_REPOSITORY` is set, which would leave every telemetry-only turn with no repo. Delta temporality is already the default, and is set anyway so a later default change cannot break it.
 
 A telemetry record identifies the engineer directly, through the harness's sign-in email, where a session event identifies only its device. That email is the harness vendor's account, not one the engineer confirmed to Neo.Tax, so it is resolved through the same contributor matcher and is no more trusted than a device's email.
 
@@ -140,7 +160,8 @@ A capture on 2026-11-11 (Claude Code 2.1.322, `scripts/dev.sh` against the fake 
 ## Risks
 
 - **A source renames an attribute.** Its turns lose usage or are rejected without the exporter noticing. Mitigated by `partialSuccess` counts and a rejected-record rate watched per source.
-- **The ingest key leaks from a managed machine.** Anyone holding it can write false telemetry into that organization. Accepted for a write-only key; revoke and remint for that destination.
+- **Any engineer can read the ingest key from managed settings.** Until v1.0, whoever holds it can post telemetry-only turns and metrics under any engineer's email and any session id, inflating or misattributing usage in that organization. To change a turn the plugin reported, a holder also needs that turn's request id, which only the engineer's machine and the model provider hold, and must claim the same engineer's email. Mitigated by `telemetry-attribution-labeled`, `telemetry-engineer-mismatch`, revoking and reminting the destination's key, and from v1.0 by `device-bound-telemetry`.
+- **The headers helper fails.** From v1.0, a machine whose agent cannot obtain a telemetry credential exports nothing until it can, and Claude Code shows a warning once per session. Accepted; the plugin's own path still reports the machine's turns.
 - **The plugin and telemetry disagree on a joined turn's usage.** Telemetry's counts are taken silently. Accepted; the difference between the two is itself a measure of the transcript parser's accuracy.
 - **Telemetry covers only part of a session.** An exporter turned on mid-session, or records lost in transit, leave some turns plugin-only, so that session adds the plugin's whole `side_usage` on top of the side calls telemetry did report. Accepted as a small overcount on partly covered sessions, which the rate of plugin-only turns per session makes visible.
 - **A fingerprint joins two different calls.** One engineer's usage lands in another call's turn. Mitigated by requiring a unique match on every token count within five seconds, and made visible by `join-key-recorded`; if the fingerprint's share of joins is high for a source, that source needs a call id instead.
