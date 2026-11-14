@@ -5,7 +5,7 @@ owner:
   - Firas Abuzaid
 created: 2026-11-02
 updated: 2026-11-14
-version: 11
+version: 12
 affects:
   - deploy/claude-code/*
   - internal/fakeingest/otlp*.go
@@ -103,6 +103,8 @@ v0.1 takes Claude Code's own export, sent directly by managed settings: logs and
 - `fake-ingest-accepts-otlp`(tested): The fake ingest server accepts OTLP/JSON log and metric export requests at `/otlp/v1/logs` and `/otlp/v1/metrics`, under any ingest key it was started with (any key when none was given) and never under a device key, with `authenticate-first`, `json-accepted`, `gzip-accepted`, and `malformed-request-refused`, and records every log record and metric data point unfiltered, so the plugin and a harness's own telemetry can run end to end against one local server.
 - `dev-stack-exports-telemetry`(built): The local dev stack runs Claude Code with its telemetry exporting logs and metrics to the fake ingest server, beside the plugin, with the exporter settings `managed-settings-exporter` names, repository attributes included, apart from the endpoint and key.
   - status-reason: `scripts/dev.sh claude` sets the exporter environment; exercised by hand against a real Claude Code, which no automated test runs
+- `dev-stack-clears-inherited-telemetry`(built): Before setting its own telemetry environment, the dev stack clears every `OTEL_*` and `CLAUDE_CODE_OTEL_*` variable and `CLAUDE_CODE_ENABLE_TELEMETRY` inherited from the shell, so a dev session never exports to a collector the engineer's shell names and never turns on content logging the fake would store; it warns when a managed settings file sets telemetry, which it cannot override.
+  - status-reason: `scripts/dev.sh claude` unsets them; the clearing step was run by hand with `OTEL_LOG_USER_PROMPTS`, a per-signal logs endpoint, `CLAUDE_CODE_OTEL_HEADERS_HELPER`, and `CLAUDE_CODE_ENABLE_TELEMETRY` exported and left none set, which no automated test runs
 - `dev-stack-capture`(built): `scripts/dev.sh capture` runs a new session, a resume, a fork, and an interactive `/clear` through the dev stack, and fails unless the plugin and telemetry agree on every session id, a fork re-sends every one of its parent's turns and the fake ingest server drops each as a duplicate rather than storing it under the fork, and every plugin turn has a telemetry call with its request id.
   - status-reason: it drives a real, logged-in Claude Code, which CI does not have; run it by hand against each new Claude Code version
 - `dev-stack-private`(built): Every file the local dev stack writes under `.dev`, including the fake ingest server's recordings and the slices `capture` copies from them, is readable by the engineer alone, because recorded telemetry carries their email and account ids.

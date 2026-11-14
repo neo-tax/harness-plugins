@@ -190,8 +190,22 @@ run_claude() {
   if running usage-audit; then
     export ANTHROPIC_BASE_URL="http://127.0.0.1:$audit_port"
   fi
-  # Claude Code's own telemetry, to the fake server's OTLP endpoints.
+  # Claude Code's own telemetry, to the fake server's OTLP endpoints. Any
+  # telemetry settings inherited from the shell are cleared first: a
+  # per-signal endpoint would send this session's telemetry to a real
+  # collector, and a content switch such as OTEL_LOG_USER_PROMPTS would have
+  # the fake write prompts to .dev/otlp.jsonl.
   # @spec: otlp-ingest#dev-stack-exports-telemetry
+  # @spec: otlp-ingest#dev-stack-clears-inherited-telemetry
+  for v in $(env | sed -n 's/^\(OTEL_[A-Za-z0-9_]*\)=.*/\1/p; s/^\(CLAUDE_CODE_OTEL_[A-Za-z0-9_]*\)=.*/\1/p'); do
+    unset "$v"
+  done
+  unset CLAUDE_CODE_ENABLE_TELEMETRY
+  for m in "/Library/Application Support/ClaudeCode/managed-settings.json" /etc/claude-code/managed-settings.json; do
+    if [ -f "$m" ] && grep -q 'OTEL_\|ENABLE_TELEMETRY' "$m"; then
+      echo "dev: warning: $m sets telemetry, which overrides this session's; its telemetry may go to that collector" >&2
+    fi
+  done
   if [ "${NEO_TAX_DEV_OTLP:-1}" != 0 ]; then
     export CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_LOGS_EXPORTER=otlp OTEL_METRICS_EXPORTER=otlp \
       OTEL_EXPORTER_OTLP_PROTOCOL=http/json OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:$port/otlp" \
