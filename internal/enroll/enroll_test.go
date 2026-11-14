@@ -24,12 +24,15 @@ import (
 )
 
 type fixture struct {
-	t      *testing.T
-	dir    string
-	srv    *httptest.Server
-	out    bytes.Buffer
-	last   contract.EnrollmentRequest
-	gitDir string
+	t    *testing.T
+	dir  string
+	srv  *httptest.Server
+	out  bytes.Buffer
+	last contract.EnrollmentRequest
+	// enrollGate, when set, receives each enroll request on arrival and
+	// holds it until the gate is closed.
+	enrollGate chan chan struct{}
+	gitDir     string
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -42,6 +45,11 @@ func newFixture(t *testing.T) *fixture {
 			buf.ReadFrom(r.Body)
 			json.Unmarshal(buf.Bytes(), &f.last)
 			r.Body = ioNopCloser{bytes.NewReader(buf.Bytes())}
+			if f.enrollGate != nil {
+				release := make(chan struct{})
+				f.enrollGate <- release
+				<-release
+			}
 		}
 		fake.ServeHTTP(w, r)
 	}))

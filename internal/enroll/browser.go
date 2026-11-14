@@ -156,7 +156,13 @@ func browserLogin(ctx context.Context, o Options, candidates []string, token, em
 				page.render(w)
 				return
 			}
-			if err := exchange(r.Context(), o, submitted, chosen); err != nil {
+			// The exchange runs on Login's context, not the request's: a
+			// browser that drops the submit (a reload, Esc, a second click)
+			// must not cancel it after the server may have spent the token
+			// and created the device, or no key would be stored.
+			//
+			// @spec: device-enrollment#browser-exchange-outlives-request
+			if err := exchange(ctx, o, submitted, chosen); err != nil {
 				// A given token that is refused is dropped, so the form
 				// asks for another.
 				if errors.Is(err, ErrTokenRejected) {

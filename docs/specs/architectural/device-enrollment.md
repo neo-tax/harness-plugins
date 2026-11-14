@@ -5,7 +5,7 @@ owner:
   - Firas Abuzaid
 created: 2026-10-24
 updated: 2026-11-13
-version: 2
+version: 3
 affects:
   - internal/queue/*.go
   - internal/enroll/*.go
@@ -33,6 +33,7 @@ Governs how a device obtains its device key: the enrollment token an admin mints
 - `token-never-in-conversation`(tested): The agent never asks the harness's model to obtain the enrollment token and never writes the token to its output; when it cannot collect the token itself, its output names the login command to run in a terminal instead.
 - `browser-form-loopback`(tested): The browser form is served only on the loopback interface, at a path holding a one-time random secret, refuses any request whose `Host` is not that loopback address and port, and stops serving once enrollment succeeds or the wait ends.
 - `browser-form-retries`(tested): A rejected token or an invalid email is reported in the form, which stays open for another try without the login command being run again.
+- `browser-exchange-outlives-request`(tested): Once the browser form is submitted, the enrollment exchange runs to completion even if the browser drops the request, so a token the server has spent always leaves its device key stored.
 - `browser-wait-bounded`(tested): The agent waits at most five minutes for the browser form, then exits reporting that login was not completed.
 - `browser-terminal-alternative`(tested): Alongside the form's address, the agent's output names the login command to run in a terminal, for a machine whose browser cannot reach the form (for example over SSH).
 - `login-skill-delegates-to-agent`(tested): In Claude Code, `neo-tax:login` is a skill whose only job is to instruct the model to run the agent's login command; it holds no logic of its own.

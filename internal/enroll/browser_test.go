@@ -477,3 +477,45 @@ func TestBrowserFormErrorsAreSentences(t *testing.T) {
 	submit(t, u, url.Values{"token": {"et_good"}, "email": {"account@example.com"}})
 	wait(t, done)
 }
+
+// A browser that drops its submit while the exchange is in flight does not
+// cancel it: the server may already have spent the token and created the
+// device, so the agent still stores the key it is sent.
+// @spec: device-enrollment#browser-exchange-outlives-request
+func TestBrowserSubmitDroppedMidExchangeStillEnrolls(t *testing.T) {
+	f := newFixture(t)
+	f.enrollGate = make(chan chan struct{})
+	u, done := f.browserLogin(t, time.Minute, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, u,
+		strings.NewReader(url.Values{"token": {"et_good"}, "email": {"account@example.com"}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	posted := make(chan error, 1)
+	go func() {
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			resp.Body.Close()
+		}
+		posted <- err
+	}()
+	var release chan struct{}
+	select {
+	case release = <-f.enrollGate:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the exchange never reached the server")
+	}
+	cancel()
+	if err := <-posted; err == nil {
+		t.Fatal("the browser's submit was not dropped")
+	}
+	// Let the agent's side notice the dropped connection before the server
+	// answers.
+	time.Sleep(100 * time.Millisecond)
+	close(release)
+	if err := wait(t, done); err != nil {
+		t.Fatalf("Login: %v\n%s", err, f.out.String())
+	}
+	if _, err := enroll.Load(f.dir); err != nil {
+		t.Fatalf("no key stored after the browser dropped its submit: %v", err)
+	}
+}
