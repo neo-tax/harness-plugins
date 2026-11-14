@@ -132,7 +132,7 @@ func (w *world) hook(name string, extra map[string]any) {
 func (w *world) login() {
 	w.t.Helper()
 	before, _ := claudecode.ReadBackfillStatus(w.data)
-	if out, code := w.shim("", "login", "--server", w.url, "--token", "et", "--email", "e@example.com"); code != 0 {
+	if out, code := w.shim("et\n", "login", "--server", w.url, "--token-stdin", "--email", "e@example.com"); code != 0 {
 		w.t.Fatalf("login exit %d: %s", code, out)
 	}
 	w.waitBackfill(before.StartedAt)
@@ -366,7 +366,7 @@ func TestBackfillInBackground(t *testing.T) {
 func TestLoginStartsBackfill(t *testing.T) {
 	w := newWorld(t)
 	w.pastSession()
-	out, code := w.shim("", "login", "--server", w.url, "--token", "et", "--email", "e@example.com")
+	out, code := w.shim("et\n", "login", "--server", w.url, "--token-stdin", "--email", "e@example.com")
 	if code != 0 || !strings.Contains(out, "background") {
 		t.Fatalf("exit %d: %s", code, out)
 	}

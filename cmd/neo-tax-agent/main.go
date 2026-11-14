@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -97,7 +98,7 @@ func login(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	dir := fs.String("data-dir", "", "plugin data directory (default $CLAUDE_PLUGIN_DATA)")
 	server := fs.String("server", os.Getenv("NEO_TAX_SERVER"), "enrollment server base URL")
-	token := fs.String("token", "", "enrollment token")
+	tokenStdin := fs.Bool("token-stdin", false, "read the enrollment token from stdin (for scripts; never on the command line)")
 	email := fs.String("email", "", "the engineer's confirmed work email")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -107,9 +108,29 @@ func login(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "neo-tax-agent: no plugin data directory; pass --data-dir")
 		return 2
 	}
+	// The token is never taken as an argument, where ps and shell history
+	// would keep it; a script pipes it in.
+	// @spec: device-enrollment#token-never-on-argv
+	var token string
+	stdinTerminal := false
+	if f, ok := stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
+		stdinTerminal = true
+	}
+	if *tokenStdin {
+		if stdinTerminal {
+			fmt.Fprintln(stderr, "neo-tax-agent: --token-stdin reads a piped token; on a terminal, run login without it to be prompted")
+			return 2
+		}
+		line, _ := bufio.NewReader(stdin).ReadString('\n')
+		token = strings.TrimSpace(line)
+		if token == "" {
+			fmt.Fprintln(stderr, "neo-tax-agent: --token-stdin read no token")
+			return 2
+		}
+	}
 	interactive := false
 	var readSecret func() (string, error)
-	if f, ok := stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
+	if f, ok := stdin.(*os.File); ok && stdinTerminal {
 		interactive = true
 		readSecret = func() (string, error) {
 			// Restore echo if the engineer interrupts at the prompt.
@@ -137,7 +158,7 @@ func login(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// its own bound. Without a terminal, the form collects the token so it
 	// never passes through the harness conversation.
 	err := enroll.Login(context.Background(), enroll.Options{
-		DataDir: d, Server: *server, Token: *token, Email: *email,
+		DataDir: d, Server: *server, Token: token, Email: *email,
 		Harness: claudecode.Harness, AgentVersion: Version,
 		AccountEmail: claudecode.AccountEmail,
 		Interactive:  interactive, In: stdin, Out: stdout, ReadSecret: readSecret,

@@ -77,11 +77,12 @@ func wait(t *testing.T, done <-chan error) error {
 
 // With no terminal, the agent collects the token and email in a local
 // browser form and enrolls when it is submitted; the conversation sees only
-// the form's address and the result.
+// the terminal alternative and the result, not the form's address.
 // @spec: device-enrollment#interactive-enrollment
 // @spec: device-enrollment#token-never-in-conversation
 // @spec: device-enrollment#browser-terminal-alternative
 // @spec: device-enrollment#email-candidates
+// @spec: device-enrollment#form-address-printed-only-as-fallback
 func TestBrowserFormEnrolls(t *testing.T) {
 	f := newFixture(t)
 	u, done := f.browserLogin(t, time.Minute, nil)
@@ -112,13 +113,16 @@ func TestBrowserFormEnrolls(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := f.out.String()
-	for _, want := range []string{u, "/path/to/neo-tax-agent login", "Enrolled this device as account@example.com."} {
+	for _, want := range []string{"/path/to/neo-tax-agent login", "Enrolled this device as account@example.com."} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
 	}
 	if strings.Contains(out, "et_good") {
 		t.Errorf("output carries the token:\n%s", out)
+	}
+	if strings.Contains(out, parsed.Path) {
+		t.Errorf("output carries the form's secret address though the browser opened:\n%s", out)
 	}
 }
 
@@ -267,8 +271,9 @@ func TestBrowserWaitBounded(t *testing.T) {
 }
 
 // When no browser can be opened, the address and the terminal command are
-// still printed, and the form still works if the engineer opens it.
+// printed, and the form still works if the engineer opens it.
 // @spec: device-enrollment#browser-terminal-alternative
+// @spec: device-enrollment#form-address-printed-only-as-fallback
 func TestBrowserFormWorksWhenNoBrowserOpens(t *testing.T) {
 	f := newFixture(t)
 	u, done := f.browserLogin(t, time.Minute, func(string) error { return errors.New("no display") })
@@ -276,8 +281,10 @@ func TestBrowserFormWorksWhenNoBrowserOpens(t *testing.T) {
 	if err := wait(t, done); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(f.out.String(), u) {
-		t.Errorf("address not printed:\n%s", f.out.String())
+	for _, want := range []string{u, "/path/to/neo-tax-agent login"} {
+		if !strings.Contains(f.out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, f.out.String())
+		}
 	}
 }
 
@@ -392,15 +399,15 @@ func TestBrowserFormAsksForATokenWhenTheGivenOneIsRejected(t *testing.T) {
 	}
 }
 
-// The form's address is in the output before any result, even when the form
-// is submitted while the browser is still opening; and the form loads
-// without waiting for the browser launcher to return.
+// The terminal alternative is in the output before any result, even when
+// the form is submitted while the browser is still opening; and the form
+// loads without waiting for the browser launcher to return.
 // @spec: device-enrollment#browser-terminal-alternative
 func TestBrowserFormAddressPrintedFirst(t *testing.T) {
 	f := newFixture(t)
 	var loaded time.Duration
 	openErr := make(chan error, 1)
-	u, done := f.browserLogin(t, time.Minute, func(u string) error {
+	_, done := f.browserLogin(t, time.Minute, func(u string) error {
 		// This runs on Login's goroutine, so it hands errors to the test
 		// goroutine rather than failing the test from here.
 		start := time.Now()
@@ -426,8 +433,8 @@ func TestBrowserFormAddressPrintedFirst(t *testing.T) {
 		t.Fatal("Login did not return")
 	}
 	out := f.out.String()
-	if a, r := strings.Index(out, u), strings.Index(out, "Enrolled this device as"); a < 0 || r < 0 || a > r {
-		t.Fatalf("address after the result:\n%s", out)
+	if a, r := strings.Index(out, "run this in a terminal"), strings.Index(out, "Enrolled this device as"); a < 0 || r < 0 || a > r {
+		t.Fatalf("terminal alternative after the result:\n%s", out)
 	}
 	if loaded > time.Second {
 		t.Errorf("form took %s to load while the browser opened", loaded)

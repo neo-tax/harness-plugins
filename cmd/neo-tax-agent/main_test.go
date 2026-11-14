@@ -21,11 +21,11 @@ func TestLoginCommand(t *testing.T) {
 	defer srv.Close()
 	dir := t.TempDir()
 	var out, errOut bytes.Buffer
-	if code := run([]string{"login", "--data-dir", dir, "--server", srv.URL, "--token", "t", "--email", "e@example.com"}, strings.NewReader(""), &out, &errOut); code != 0 {
+	if code := run([]string{"login", "--data-dir", dir, "--server", srv.URL, "--token-stdin", "--email", "e@example.com"}, strings.NewReader("t\n"), &out, &errOut); code != 0 {
 		t.Fatalf("exit %d: %s", code, errOut.String())
 	}
 	out.Reset()
-	if code := run([]string{"login", "--data-dir", dir, "--server", srv.URL, "--token", "t", "--email", "e@example.com"}, strings.NewReader(""), &out, &errOut); code != 0 {
+	if code := run([]string{"login", "--data-dir", dir, "--server", srv.URL, "--token-stdin", "--email", "e@example.com"}, strings.NewReader("t\n"), &out, &errOut); code != 0 {
 		t.Fatalf("exit %d: %s", code, errOut.String())
 	}
 	if _, err := enroll.Load(dir); err != nil {
@@ -61,7 +61,7 @@ func TestLoginWithoutTerminalUsesTheBrowserForm(t *testing.T) {
 		}
 	}()
 	var out, errOut bytes.Buffer
-	if code := run([]string{"login", "--data-dir", dir, "--server", srv.URL}, strings.NewReader(""), &out, &errOut); code != 0 {
+	if code := run([]string{"login", "--data-dir", dir, "--server", srv.URL}, strings.NewReader("t\n"), &out, &errOut); code != 0 {
 		t.Fatalf("exit %d: %s%s", code, out.String(), errOut.String())
 	}
 	if !strings.Contains(out.String(), " login --data-dir ") || !strings.Contains(out.String(), " --server "+srv.URL) {
@@ -76,5 +76,25 @@ func TestVersion(t *testing.T) {
 	var out bytes.Buffer
 	if run([]string{"version"}, nil, &out, &out) != 0 || strings.TrimSpace(out.String()) != Version {
 		t.Fatal(out.String())
+	}
+}
+
+// The enrollment token is never an argument, where ps and shell history
+// would keep it: --token does not exist, and --token-stdin reads it from a
+// pipe.
+// @spec: device-enrollment#token-never-on-argv
+func TestLoginTakesTheTokenOnlyFromStdin(t *testing.T) {
+	srv := httptest.NewServer(fakeingest.New(fakeingest.Options{}))
+	defer srv.Close()
+	dir := t.TempDir()
+	var out, errOut bytes.Buffer
+	if code := run([]string{"login", "--data-dir", dir, "--server", srv.URL, "--token", "t", "--email", "e@example.com"}, strings.NewReader(""), &out, &errOut); code != 2 {
+		t.Fatalf("--token accepted: exit %d", code)
+	}
+	if code := run([]string{"login", "--data-dir", dir, "--server", srv.URL, "--token-stdin", "--email", "e@example.com"}, strings.NewReader("\n"), &out, &errOut); code != 2 {
+		t.Fatalf("empty piped token: exit %d", code)
+	}
+	if _, err := enroll.Load(dir); err == nil {
+		t.Fatal("enrolled without a token")
 	}
 }

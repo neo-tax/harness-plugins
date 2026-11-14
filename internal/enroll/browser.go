@@ -188,15 +188,21 @@ func browserLogin(ctx context.Context, o Options, candidates []string, token, em
 		srv.Shutdown(sctx)
 	}()
 
-	// The address is printed under the lock before the browser is opened,
-	// so a submit (which writes its result to the same output) cannot come
-	// first, and the lock is not held while the launcher runs.
+	// The output goes to the harness conversation, so the address, which
+	// carries the form's secret, is printed only when no browser could be
+	// opened to it. The rest is printed under the lock before the browser is
+	// opened, so a submit (which writes its result to the same output)
+	// cannot come first, and the lock is not held while the launcher runs.
+	//
+	// @spec: device-enrollment#form-address-printed-only-as-fallback
 	mu.Lock()
-	fmt.Fprintf(o.Out, "To finish enrolling with Neo.Tax, open this address in a browser on this machine:\n  %s\nWaiting up to %s for the form. If this machine has no browser that can reach it (for example over SSH), run this in a terminal instead:\n  %s\n",
-		formURL, minutes(wait), o.TerminalCommand)
+	fmt.Fprintf(o.Out, "To finish enrolling with Neo.Tax, use the form opening in your browser. Waiting up to %s for it. If this machine has no browser that can reach it (for example over SSH), run this in a terminal instead:\n  %s\n",
+		minutes(wait), o.TerminalCommand)
 	mu.Unlock()
-	if o.OpenURL != nil {
-		o.OpenURL(formURL)
+	if o.OpenURL == nil || o.OpenURL(formURL) != nil {
+		mu.Lock()
+		fmt.Fprintf(o.Out, "No browser could be opened. Open this address in a browser on this machine:\n  %s\n", formURL)
+		mu.Unlock()
 	}
 
 	timer := time.NewTimer(wait)

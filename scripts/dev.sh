@@ -150,9 +150,9 @@ up() {
   echo "dev: plugin installed from this working tree"
 
   email=$(git -C "$repo" config user.email 2>/dev/null || echo dev@example.com)
-  with_config env NEO_TAX_AGENT_BIN="$dev/bin/neo-tax-agent" \
+  echo dev | with_config env NEO_TAX_AGENT_BIN="$dev/bin/neo-tax-agent" \
     "$market/plugins/claude-code/bin/neo-tax-agent" login \
-    --server "http://127.0.0.1:$port" --token dev --email "$email"
+    --server "http://127.0.0.1:$port" --token-stdin --email "$email"
 
   echo
   if [ "$my_config" = 0 ]; then
