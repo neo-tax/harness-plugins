@@ -185,15 +185,15 @@ func TestSessionEndWaitsPastAnOlderCostState(t *testing.T) {
 	}
 }
 
-// A resumed session that exits with no new assistant message still wrote
-// lines of its own after the earlier exit's totals, so those are stale too.
+// A resumed session that exits after a prompt wrote a user line after the
+// earlier exit's totals, so those are stale until its own arrive.
 // @spec: claude-code-transcript-parser#side-usage-null-without-totals
-func TestSessionEndWaitsPastTotalsFollowedByAnyLine(t *testing.T) {
+func TestSessionEndWaitsPastTotalsFollowedByAUserLine(t *testing.T) {
 	defer setCostStateWait(5 * time.Second)()
 	h := newHookEnv(t, true)
 	h.appendLines(
 		costState(1, map[string]map[string]int64{"claude-haiku-5-5": {"inputTokens": 900}}),
-		`{"type":"last-prompt","sessionId":"fixture-session"}`,
+		`{"type":"user","sessionId":"fixture-session","message":{"role":"user","content":"placeholder"}}`,
 	)
 	go func() {
 		time.Sleep(200 * time.Millisecond)
@@ -207,8 +207,8 @@ func TestSessionEndWaitsPastTotalsFollowedByAnyLine(t *testing.T) {
 	}
 }
 
-// Claude Code can write an artifact-comment-monitor line after its exit
-// totals; that does not make them stale.
+// Claude Code writes bookkeeping lines after its exit totals; only a user or
+// assistant line makes them stale, so a type not seen before does not.
 // @spec: claude-code-transcript-parser#side-usage-null-without-totals
 func TestSessionEndTotalsStayCurrentAfterExitLines(t *testing.T) {
 	defer setCostStateWait(50 * time.Millisecond)()
@@ -216,6 +216,10 @@ func TestSessionEndTotalsStayCurrentAfterExitLines(t *testing.T) {
 	h.appendLines(
 		costState(1, map[string]map[string]int64{"claude-haiku-5-5": {"inputTokens": 905}}),
 		`{"type":"artifact-comment-monitor","sessionId":"fixture-session"}`,
+		`{"type":"bridge-session","sessionId":"fixture-session"}`,
+		`{"type":"tools-used","sessionId":"fixture-session"}`,
+		`{"type":"queue-operation","operation":"dequeue","sessionId":"fixture-session"}`,
+		`{"type":"some-future-type","sessionId":"fixture-session","note":"\"type\":\"user\""}`,
 	)
 	h.run("SessionEnd", map[string]any{"reason": "other"})
 	want := []any{entry("claude-haiku-5-5", 900, 0, 0, 0, 0)}
@@ -252,6 +256,40 @@ func TestSessionEndUsesCurrentCostStateWithoutWaiting(t *testing.T) {
 	want := []any{entry("claude-haiku-5-5", 900, 0, 0, 0, 0)}
 	if got := h.closed()["side_usage"]; !reflect.DeepEqual(got, want) {
 		t.Fatalf("side_usage %v, want %v", got, want)
+	}
+}
+
+// Claude Code through 2.1.310 wrote cache creation unsplit in cost-state,
+// while each turn splits it. The turns' writes of both tiers come off the
+// unsplit total, and what is left is reported as five-minute writes.
+// @spec: claude-code-transcript-parser#side-usage-cache-split
+func TestSessionEndSubtractsSplitTurnsFromAnUnsplitTotal(t *testing.T) {
+	h := newHookEnv(t, true)
+	h.appendLines(costState(1, map[string]map[string]int64{
+		// opus turns: 5m 100, 1h 200. Total 350 unsplit: 50 left over.
+		"claude-opus-5-5": {"inputTokens": 10, "outputTokens": 20, "cacheReadInputTokens": 4000, "cacheCreationInputTokens": 350},
+		// sonnet turns: 5m 3. Total 3 unsplit: nothing left over.
+		"claude-sonnet-5-5": {"inputTokens": 1, "outputTokens": 2, "cacheReadInputTokens": 4, "cacheCreationInputTokens": 3},
+	}))
+	h.run("SessionEnd", map[string]any{"reason": "other"})
+	want := []any{entry("claude-opus-5-5", 0, 0, 50, 0, 0)}
+	if got := h.closed()["side_usage"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("side_usage %v, want %v", got, want)
+	}
+}
+
+// An unsplit total equal to the turns' split writes leaves no side cache
+// writes, where counting it all as five-minute writes left the turns'
+// one-hour writes behind as side usage.
+// @spec: claude-code-transcript-parser#side-usage-cache-split
+func TestSessionEndUnsplitTotalCoveredByTurns(t *testing.T) {
+	h := newHookEnv(t, true)
+	h.appendLines(costState(1, map[string]map[string]int64{
+		"claude-opus-5-5": {"inputTokens": 10, "outputTokens": 20, "cacheReadInputTokens": 4000, "cacheCreationInputTokens": 300},
+	}))
+	h.run("SessionEnd", map[string]any{"reason": "other"})
+	if got := h.closed()["side_usage"]; !reflect.DeepEqual(got, []any{}) {
+		t.Fatalf("side_usage %v, want []", got)
 	}
 }
 

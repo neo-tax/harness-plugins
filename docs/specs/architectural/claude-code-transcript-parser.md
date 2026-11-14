@@ -4,8 +4,8 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-10-24
-updated: 2026-11-12
-version: 3
+updated: 2026-11-13
+version: 4
 affects:
   - internal/adapter/claudecode/*.go
   - internal/cursor/*.go
@@ -35,8 +35,8 @@ Governs how the Claude Code adapter turns hook payloads and on-disk transcripts 
 - `closed-on-session-end`(tested): `SessionEnd` produces one `session.closed` event with the harness's end reason.
 - `session-totals-from-cost-state`(tested): The session's totals are read from the main transcript's `cost-state` lines: per model, the latest line of each process's tally (lines sharing a `startTime`), summed across tallies.
 - `side-usage-is-totals-minus-turns`(tested): `side_usage` is, per model and per count, the session's totals less the usage of every turn of the session (main thread and subagents, each message counted once), clamped at zero, with models whose counts are all zero left out.
-- `side-usage-null-without-totals`(tested): `side_usage` is null when, after a bounded wait at a `SessionEnd` whose reason is an exit (`prompt_input_exit` or `other`), or at once for any other reason, the main transcript's latest `cost-state` line is followed by any line other than those Claude Code writes after exiting, since such a line is an older process's totals (a resumed session's earlier exit) and would leave out what happened since.
-- `side-usage-cache-split`(tested): Session totals split cache creation into five-minute and one-hour counts as the `cost-state` line reports them, and map an unsplit amount to `cache_write_5m`, as turns do.
+- `side-usage-null-without-totals`(tested): `side_usage` is null when, after a bounded wait at a `SessionEnd` whose reason is an exit (`prompt_input_exit` or `other`), or at once for any other reason, the main transcript's latest `cost-state` line is followed by a user or assistant line, since such totals are an older process's (a resumed session's earlier exit) and would leave out what happened since. Other line types after it, which Claude Code writes as bookkeeping after exiting and adds to between versions, do not make the totals stale.
+- `side-usage-cache-split`(tested): Session totals split cache creation into five-minute and one-hour counts as the `cost-state` line reports them. Where a `cost-state` line does not split it (Claude Code through 2.1.310), the turns' cache writes of both tiers are subtracted from the unsplit amount, after the split amounts of the same tier, and what remains is reported as `cache_write_5m`, as an unsplit turn's writes are.
 - `branch-per-turn`(tested): A turn's `branch` is the transcript's recorded branch for that message when present, else the branch read from the working directory at hook time.
 - `transcript-version-recorded`(tested): The harness version recorded in the transcript is what the envelope's `harness_version` carries.
 - `content-never-read-into-events`(tested): Message content, tool inputs, tool results, titles, and the working-directory path are never copied into any event, under any condition.
