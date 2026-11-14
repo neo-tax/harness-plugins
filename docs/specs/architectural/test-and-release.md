@@ -4,8 +4,8 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-10-24
-updated: 2026-11-11
-version: 3
+updated: 2026-11-13
+version: 4
 affects:
   - internal/fakeingest/*.go
   - .github/workflows/ci.yml
@@ -19,6 +19,7 @@ affects:
   - scripts/smoke-test.sh
   - internal/specs/*.go
   - .claude-plugin/marketplace.json
+  - plugins/claude-code/bin/neo-tax-agent
 ---
 
 # Test and release
@@ -43,6 +44,8 @@ Governs how the agent and plugins are tested, how a release is cut, and what art
   - status-reason: the release workflow's build matrix; CI cross-compiles the same five targets on every push
 - `release-attaches-binaries`(built): Release binaries and the fake ingest server for the same targets are attached to a GitHub release for the tag.
   - status-reason: the release workflow's publish job; exercised by the first release
+- `public-release-downloads`(built): This repository is public, and the plugin's launcher downloads the agent binary for the plugin's version, and the release's `checksums.txt`, from the repository's GitHub release over HTTPS with no credential.
+  - status-reason: the launcher fetches both with unauthenticated curl; the repository's visibility is a GitHub setting, not code
 - `manifest-version-matches-tag`(tested): The release workflow fails if any plugin manifest's version, or the latest channel marketplace's version, differs from the tag; the stable marketplace's version is set to the tag when the marketplace is pinned after publish.
 - `marketplace-source-is-this-repo`(tested): The marketplace manifest's source for each plugin is this repository at the released tag, so a harness's plugin auto-update follows releases.
 - `pin-through-pull-request`(built): The stable marketplace's pin reaches main through a pull request that the release workflow opens after publish, carrying one signed commit, and merging it needs one approval; the workflow never pushes to main.
@@ -58,7 +61,7 @@ Governs how the agent and plugins are tested, how a release is cut, and what art
 
 ## Design Notes
 
-The marketplace's plugin source is a `git-subdir` of this repository at the release tag, so the plugin version an engineer gets is exactly the tagged tree. A release bumps each `plugin.json` on main and pushes the tag; the release workflow checks the manifests against the tag, builds, publishes, and only then opens a pull request that pins the stable marketplace on main to the tag, so the marketplace never points at a tag whose binaries are not attached yet. main's ruleset requires a pull request with one approval and signed commits, and the workflow cannot bypass it, so the workflow creates the pin commit through the GitHub API (which signs it) on a `release/pin-<tag>` branch rather than pushing; a rerun finds the open pull request and stops. Once the pin merges, the plugin's launcher downloads the agent binary attached to that tag and checks it against the release's `checksums.txt`. From v1.0 a second marketplace under `channels/latest/` points the same plugin at `main`.
+The marketplace's plugin source is a `git-subdir` of this repository at the release tag, so the plugin version an engineer gets is exactly the tagged tree. A release bumps each `plugin.json` on main and pushes the tag; the release workflow checks the manifests against the tag, builds, publishes, and only then opens a pull request that pins the stable marketplace on main to the tag, so the marketplace never points at a tag whose binaries are not attached yet. main's ruleset requires a pull request with one approval and signed commits, and the workflow cannot bypass it, so the workflow creates the pin commit through the GitHub API (which signs it) on a `release/pin-<tag>` branch rather than pushing; a rerun finds the open pull request and stops. Once the pin merges, the plugin's launcher downloads the agent binary attached to that tag from the public release, with no credential, and checks it against the release's `checksums.txt`. From v1.0 a second marketplace under `channels/latest/` points the same plugin at `main`.
 
 Fixtures are the contract between the adapter and the harness: when a harness ships a new transcript format, the response is a new anonymized fixture and, only if it fails, a parser change. This keeps harness variability as data rather than code branches.
 

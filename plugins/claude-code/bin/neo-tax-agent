@@ -36,6 +36,8 @@ ext=""
 cache="$NEO_TAX_DATA_DIR/bin"
 bin="$cache/neo-tax-agent-v$version$ext"
 
+# The repository is public, so the release needs no credential.
+# @spec: test-and-release#public-release-downloads
 if [ ! -x "$bin" ]; then
   asset="neo-tax-agent_${os}_${arch}${ext}"
   base="https://github.com/$repo/releases/download/v$version"
