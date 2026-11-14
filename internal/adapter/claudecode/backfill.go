@@ -44,7 +44,7 @@ type BackfillOptions struct {
 	// backfill queued first.
 	QueueLimit int64
 	// WaitBudget bounds the total time a backfill waits out ingest backoff
-	// before it pauses. Defaults to 24 hours.
+	// before it pauses. Defaults to 6 hours.
 	WaitBudget time.Duration
 	// Sleep waits for d or until ctx is done. Defaults to a timer; tests
 	// replace it to advance a fake clock.
@@ -56,7 +56,7 @@ type BackfillOptions struct {
 
 // DefaultWaitBudget is how long a backfill waits out ingest backoff, in
 // total, before it pauses.
-const DefaultWaitBudget = 24 * time.Hour
+const DefaultWaitBudget = 6 * time.Hour
 
 // minRetry is the shortest wait between flushes while the queue is over its
 // limit: when no backoff is recorded, a hook holds the flush lock.
