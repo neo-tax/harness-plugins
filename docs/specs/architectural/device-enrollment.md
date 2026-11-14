@@ -23,17 +23,17 @@ Governs how a device obtains its device key: the enrollment token an admin mints
 
 - `enrollment-is-the-only-way-to-get-a-key`(tested): A device key is issued only by exchanging an enrollment token; no other path mints one.
 - `token-scope`(built): An enrollment token can do nothing except enroll devices into the one organization it was minted for.
-  - status-reason: tested in platform-new projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts: a token enrolls devices into its own organization only
+  - status-reason: unmerged: built in platform-new #5601, which is still open, and tested there in projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts: a token enrolls devices into its own organization only
 - `token-use-count-chosen-at-mint`(built): An admin chooses at mint time whether a token is single-use or multi-use.
-  - status-reason: tested in platform-new projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts; single_use is set at mint and enforced by a conditional update
+  - status-reason: unmerged: built in platform-new #5601, which is still open, and tested there in projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts; single_use is set at mint and enforced by a conditional update
 - `token-default-expiry`(built): An enrollment token expires seven days after mint unless the admin sets a different expiry.
-  - status-reason: implemented in platform-new projects/server/src/harness-ingest/harness-enrollment.service.ts (DEFAULT_ENROLLMENT_TOKEN_TTL_MS); no test asserts the seven days
+  - status-reason: unmerged: built in platform-new #5601, which is still open, in projects/server/src/harness-ingest/harness-enrollment.service.ts (DEFAULT_ENROLLMENT_TOKEN_TTL_MS); no test asserts the seven days
 - `token-revocable`(built): An admin can revoke an enrollment token before it expires, and revoking it does not affect devices already enrolled with it.
-  - status-reason: tested in platform-new projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts
+  - status-reason: unmerged: built in platform-new #5601, which is still open, and tested there in projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts
 - `device-key-scope`(built): A device key authorizes session ingest only; it cannot read or write any other Neo.Tax resource.
-  - status-reason: tested in platform-new projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts; only the harness ingest route looks a credential up in harness_devices
+  - status-reason: unmerged: built in platform-new #5601, which is still open, and tested there in projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts; only the harness ingest route looks a credential up in harness_devices
 - `device-key-revocable-individually`(built): Revoking one device key does not affect any other device key, including others minted from the same enrollment token.
-  - status-reason: tested in platform-new projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts
+  - status-reason: unmerged: built in platform-new #5601, which is still open, and tested there in projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts
 - `one-key-per-device`(tested): A device holds exactly one device key; enrolling again replaces it.
 - `interactive-enrollment`(tested): The engineer enrolls by invoking the harness's `neo-tax:login` entry point, which runs the agent's login command; the agent collects the enrollment token and the email itself, through prompts when it has a terminal and through a local browser form when it does not.
 - `token-never-in-conversation`(tested): The agent never asks the harness's model to obtain the enrollment token and never writes the token to its output; when it cannot collect the token itself, its output names the login command to run in a terminal instead.

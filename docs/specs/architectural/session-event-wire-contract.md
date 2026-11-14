@@ -27,7 +27,7 @@ Governs every request and response exchanged between the agent and Neo.Tax: the 
 - `breaking-change-is-new-version`(built): A change that would make a previously valid request invalid, or change the meaning of an existing field, is published under a new `contract_version`; additive optional fields are not.
   - status-reason: contract.Version in contract/contract.go names the published version; whether a schema change is breaking is decided in review, not by a test
 - `previous-version-accepted`(built): The server accepts the previous `contract_version` until every published plugin release has moved to the current one.
-  - status-reason: implemented in platform-new projects/server/src/harness-ingest/harness-contract.ts (ACCEPTED_CONTRACT_VERSIONS); only version 1 exists so far
+  - status-reason: unmerged: built in platform-new #5601, which is still open, in projects/server/src/harness-ingest/harness-contract.ts (ACCEPTED_CONTRACT_VERSIONS); only version 1 exists so far
 - `event-kinds`(tested): A session event has exactly one of the kinds `session.opened`, `session.turn`, `session.pr_opened`, or `session.closed`.
 - `envelope-fields`(tested): Every session event carries `contract_version`, `device_id`, `harness`, `harness_version`, `agent_version`, `session_id`, `event_kind`, and `sent_at`, and no other envelope field.
 - `opened-fields`(tested): A `session.opened` event carries `started_at`, `entrypoint`, `source`, `repo`, `branch`, `head_sha`, `git_user_email`, and `dropped_events`.
@@ -40,16 +40,16 @@ Governs every request and response exchanged between the agent and Neo.Tax: the 
 - `repo-shape`(tested): `repo` is either null or an object of `host`, `owner`, and `name`, each lowercase.
 - `subagent-turns-belong-to-parent`(tested): A turn produced by a subagent carries the parent session's `session_id` and a non-null `subagent_id`; a main-thread turn carries a null `subagent_id`.
 - `idempotency-key`(built): The server treats two events with the same `device_id`, `session_id`, `event_kind`, and `message_id` as the same event; for `session.pr_opened` the key adds `repo` and `number`; for `session.closed` it adds `ended_at`, so a resumed session's later close is kept; for `session.opened`, without a `message_id`, the key uses the event kind alone within the session.
-  - status-reason: tested in platform-new projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts
+  - status-reason: unmerged: built in platform-new #5601, which is still open, and tested there in projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts
 - `batched-ingest`(tested): An ingest request carries an ordered array of between 1 and 500 session events.
 - `ingest-response-per-event`(tested): An ingest response reports, for the batch as a whole, how many events were accepted, how many were duplicates, and the index and reason of each event rejected for schema reasons.
 - `schema-rejection-is-partial`(built): A schema-invalid event in a batch does not cause the server to reject the valid events in the same batch.
-  - status-reason: tested in platform-new projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts
+  - status-reason: unmerged: built in platform-new #5601, which is still open, and tested there in projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts
 - `enrollment-request`(tested): An enrollment request carries the enrollment token, the confirmed email, `email_confirmed_by`, a device description (hostname, OS, architecture, harness, harness version, agent version), and `contract_version`.
 - `enrollment-response`(tested): A successful enrollment response carries `device_id`, the device key, and the ingest base URL the device is to use.
 - `email-confirmed-by-values`(tested): `email_confirmed_by` is one of `engineer` or `auto`.
 - `auth-errors-are-distinct`(built): The server distinguishes an invalid or revoked device key (401), a device key that is valid but not permitted to ingest (403), and a schema failure (422) by status code, because the agent reacts to each differently.
-  - status-reason: implemented in platform-new projects/server/src/harness-ingest/harness-ingest.controller.ts; 401 and 422 are tested, 403 is reserved because a device has no state between live and revoked
+  - status-reason: unmerged: built in platform-new #5601, which is still open, in projects/server/src/harness-ingest/harness-ingest.controller.ts; 401 and 422 are tested, 403 is reserved because a device has no state between live and revoked
 - `platform-vendors-pinned-copy`(approved): Neo.Tax's server validates incoming requests against a vendored copy of these schemas, and a CI check in that repository fails when the copy differs from the tagged release it pins.
 - `fake-ingest-validates-same-schemas`(tested): The fake ingest server validates requests against the schema documents in this repository, not against a separate copy.
 

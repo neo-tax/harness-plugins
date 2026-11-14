@@ -14,6 +14,7 @@ Code that runs on an engineer's machine to observe AI coding sessions and report
 - Every requirement line carries a status (`draft`, `approved`, `built`, `tested`). When you implement one, move it to `built` with a `status-reason`, or to `tested` when a test covers it. Bump `updated`, and `version` for a material change, and extend `affects` to the files that implement it.
 - A requirement that no longer holds is a spec change in the same pull request, never a silent divergence.
 - Tag code that implements a requirement with `@spec: <spec-id>#<slug>`.
+- A requirement implemented in another repository (the Neo.Tax server is `platform-new`) is `built` once a pull request there implements it. Its `status-reason` cites that pull request and the file, and starts with `unmerged:` until the pull request merges.
 
 ## Hard rules
 
