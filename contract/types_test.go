@@ -32,7 +32,7 @@ func typedEvents() []any {
 		contract.NewOpened(testEnvelope, contract.OpenedFields{StartedAt: ts, Entrypoint: ptr("cli"), Source: ptr("startup"), Repo: r, Branch: ptr("main"), HeadSHA: sha, GitUserEmail: ptr("e@example.com")}),
 		contract.NewTurn(testEnvelope, contract.TurnFields{MessageID: "msg_1", Timestamp: ts, Usage: contract.UnknownUsage()}),
 		contract.NewTurn(testEnvelope, contract.TurnFields{MessageID: "msg_2", SubagentID: ptr("a1"), Timestamp: ts, Model: ptr("claude-opus-5-5"), Usage: contract.Usage{
-			Input: ptr(int64(1)), Output: ptr(int64(2)), CacheWrite5m: ptr(int64(0)), CacheWrite1h: ptr(int64(3)), CacheRead: ptr(int64(4)), ServiceTier: ptr("standard"), Source: contract.UsageSourceTranscript,
+			Input: ptr(int64(1)), Output: ptr(int64(2)), CacheWrite5m: ptr(int64(0)), CacheWrite1h: ptr(int64(3)), CacheRead: ptr(int64(4)), ServiceTier: ptr("standard"), Speed: ptr("fast"), Source: contract.UsageSourceTranscript,
 		}}),
 		contract.NewPROpened(testEnvelope, contract.PROpenedFields{Repo: r, Number: 7, Timestamp: ts}),
 		contract.NewClosed(testEnvelope, contract.ClosedFields{EndedAt: ts, Reason: ptr("other"), DroppedEvents: 3}),

@@ -55,6 +55,7 @@ type Usage struct {
 	CacheWrite1h *int64  `json:"cache_write_1h"`
 	CacheRead    *int64  `json:"cache_read"`
 	ServiceTier  *string `json:"service_tier"`
+	Speed        *string `json:"speed"`
 	Source       string  `json:"source"`
 }
 

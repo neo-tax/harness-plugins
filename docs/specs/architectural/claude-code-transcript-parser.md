@@ -5,7 +5,7 @@ owner:
   - Firas Abuzaid
 created: 2026-10-24
 updated: 2026-11-14
-version: 8
+version: 9
 affects:
   - internal/adapter/claudecode/*.go
   - internal/cursor/*.go
@@ -26,7 +26,7 @@ Governs how the Claude Code adapter turns hook payloads and on-disk transcripts 
 - `turns-from-transcript-tail`(tested): On `Stop`, `PreCompact`, and `SessionEnd`, the adapter reads the session transcript from its stored cursor to the end and emits one `session.turn` per assistant message not yet emitted.
 - `fork-skips-copied-lines`(tested): At a `SessionStart` whose `source` is fork, the adapter records the hook's time against the session's transcript, and its reads of that transcript and its subagent transcripts skip assistant and pull-request lines timestamped before it, which Claude Code copied from the parent session. The record is kept until the transcript is written, for up to a day. A backfill resets it and reads a fork from the start.
 - `dedupe-by-message-id`(tested): An assistant message that spans several transcript lines produces exactly one turn, keyed by the message id, because every line of that message repeats the same usage block.
-- `usage-mapping`(tested): A turn's `usage` maps the transcript's input, output, cache-read, and cache-creation counts, with cache creation split into the five-minute and one-hour entries the transcript reports, and `service_tier` as reported.
+- `usage-mapping`(tested): A turn's `usage` maps the transcript's input, output, cache-read, and cache-creation counts, with cache creation split into the five-minute and one-hour entries the transcript reports, and `service_tier` and `speed` as reported, each null when the transcript has none.
 - `usage-source-transcript`(tested): A turn whose counts came from the transcript carries `usage.source` as `transcript`.
 - `usage-unknown-when-absent`(tested): An assistant message with no usage block produces a turn with `usage.source` as `unknown` and null counts.
 - `request-id-from-transcript`(tested): A turn's `request_id` is the API request id the transcript records for that message, or null.
@@ -67,8 +67,5 @@ Claude Code makes API calls that never become an assistant message in the transc
 - **A harness release starts canceling async `SessionEnd` hooks.** A hook canceled before its events are queued loses `session.closed` and the session's final tail. Detected by the server's rate of sessions without `session.closed` per harness version; the install smoke test can assert `session.closed` arrives after the harness exits.
 - **A session with no `SessionEnd`.** The harness was killed and no `session.closed` arrives. Accepted; the server treats a session as closed after inactivity. Its side usage is lost as well, since Claude Code writes `cost-state` only on a clean exit.
 - **Transcript saving is off.** Claude Code then writes no transcript, so the adapter emits the session's opens and closes but no turns; a session launched from inside another Claude Code session inherits a marker that turns saving off. Detectable as sessions with no turns; the OTLP path (`otlp-ingest`) still reports their calls.
+- **Side usage has no speed.** `cost-state` totals are per model, not per speed, so side calls made in fast mode (compaction in a fast session) are reported without it and priced at standard speed. Claude Code's telemetry splits its token and cost metrics by `speed`, which bounds the error where it is exported.
 - **`cost-state` changes or disappears.** `side_usage` turns null and side calls go uncounted again. Detectable: the server can watch the null rate per harness version, and `scripts/dev.sh audit` re-measures against the API.
-
-## Open Questions
-
-- Whether a turn should also carry the transcript's reported model speed setting, which affects price.

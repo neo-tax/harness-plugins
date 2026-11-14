@@ -4,8 +4,8 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-11-02
-updated: 2026-11-13
-version: 10
+updated: 2026-11-14
+version: 11
 affects:
   - deploy/claude-code/*
   - internal/fakeingest/otlp*.go
@@ -51,7 +51,7 @@ v0.1 takes Claude Code's own export, sent directly by managed settings: logs and
 - `claude-code-api-request-is-turn`(approved): Each Claude Code log record whose `event.name` attribute is `api_request` (its body is `claude_code.api_request`; the OTLP `eventName` field is empty) becomes one turn of the session named by its `session.id` attribute.
 - `claude-code-other-events-dropped`(approved): Every other Claude Code event, including prompts, assistant responses, tool results and decisions, API errors, and API request and response bodies, is dropped and is not counted as rejected.
 - `claude-code-fixture`(approved): The Claude Code mapping is specified by a fixture: a captured Claude Code OTLP/JSON log export paired with the turns it must produce.
-- `claude-code-turn-mapping`(approved): A Claude Code turn takes its model from `model`; its input, output, and cache read counts from `input_tokens`, `output_tokens`, and `cache_read_tokens`; its cache write counts from `cache_creation_5m_tokens` and `cache_creation_1h_tokens`; its timestamp from `event.timestamp`; its request id from `request_id`; and its estimated cost from `cost_usd`.
+- `claude-code-turn-mapping`(approved): A Claude Code turn takes its model from `model`; its input, output, and cache read counts from `input_tokens`, `output_tokens`, and `cache_read_tokens`; its cache write counts from `cache_creation_5m_tokens` and `cache_creation_1h_tokens`; its speed from `speed`, with `normal` stored as `standard` to match the transcript, and null when absent; its timestamp from `event.timestamp`; its request id from `request_id`; and its estimated cost from `cost_usd`.
 - `claude-code-unsplit-cache-write`(draft): A Claude Code turn without the split cache write attributes counts `cache_creation_tokens` as five-minute cache writes.
 - `claude-code-repo-mapping`(approved): A Claude Code turn's repo is the host of `vcs.repository.url.full` with `vcs.owner.name` and `vcs.repository.name`, each lowercase, in the same shape as the wire contract's `repo`, and is null when those attributes are absent.
 - `numeric-attribute-encodings`(approved): A token count is read from an `intValue` or from a `stringValue` holding a base-10 integer, and a cost from a `doubleValue`, an `intValue`, or a `stringValue` holding a decimal number.
@@ -63,7 +63,7 @@ v0.1 takes Claude Code's own export, sent directly by managed settings: logs and
 ### Allowlist and identity
 
 - `server-allowlist`(approved): Of each log record the endpoint keeps only the attributes its source's mapping names: model, token counts, estimated cost, event timestamp, session id, call ids, user email, and repo; no other attribute, resource attribute, or record body is stored.
-- `metric-allowlist`(approved): Of each metric data point the endpoint keeps only the metric name, its value, its start and end times, and the attributes its source's mapping names: for Claude Code, `session.id`, `user.email`, `model`, `type`, `query_source`, and the repo attributes; no other attribute (including agent, skill, plugin, and MCP server names), resource attribute, or exemplar is stored.
+- `metric-allowlist`(approved): Of each metric data point the endpoint keeps only the metric name, its value, its start and end times, and the attributes its source's mapping names: for Claude Code, `session.id`, `user.email`, `model`, `type`, `query_source`, `speed`, and the repo attributes; no other attribute (including agent, skill, plugin, and MCP server names), resource attribute, or exemplar is stored.
 - `content-never-stored`(approved): Prompt text, response text, tool inputs and outputs, commands, file paths, MCP server, tool, and skill names, and API bodies are dropped before anything is stored or logged, whether they arrive as an attribute, a resource attribute, or a record body, and even when the sending harness is configured to export them.
 - `managed-settings-no-content`(tested): The managed settings Neo.Tax ships to turn on Claude Code's export never enable `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_ASSISTANT_RESPONSES`, `OTEL_LOG_TOOL_DETAILS`, `OTEL_LOG_TOOL_CONTENT`, or `OTEL_LOG_RAW_API_BODIES`, so Claude Code redacts content before it leaves the machine.
 - `allowlist-before-write`(approved): The allowlist is applied before any part of a record is written to storage or to a log line.
@@ -81,7 +81,7 @@ v0.1 takes Claude Code's own export, sent directly by managed settings: logs and
 - `one-turn-per-call-id`(approved): Plugin turns in one organization that share a call id are one turn: the first stored keeps its session, and later ones are counted as duplicates.
 - `join-key-recorded`(approved): A joined turn records the key that joined it (response id, request id, or fingerprint), so the join rate can be measured per source and per key.
 - `join-order-independent`(approved): A joined turn is the same whichever of its two paths arrives first.
-- `telemetry-wins-usage`(approved): A joined turn takes its token counts and cost from telemetry, and its model from telemetry when telemetry carries one, else from the plugin, but only when the telemetry record's `user.email` resolves to the same engineer as the plugin turn's device.
+- `telemetry-wins-usage`(approved): A joined turn takes its token counts, speed, and cost from telemetry, and its model from telemetry when telemetry carries one, else from the plugin, but only when the telemetry record's `user.email` resolves to the same engineer as the plugin turn's device.
 - `telemetry-engineer-mismatch`(approved): A joined turn whose telemetry `user.email` is missing or resolves to an engineer other than its device's keeps the plugin's usage and model, and records that its telemetry was set aside and why, so the rate can be watched per ingest key.
 - `plugin-wins-context`(approved): A joined turn takes its session, engineer, timestamp, repo, branch, head SHA, and subagent id from the plugin, its engineer being the one its device resolves to, and telemetry never sets them.
 - `plugin-wins-otherwise`(approved): Any field of a joined turn that both paths carry and no other requirement assigns comes from the plugin.
@@ -93,7 +93,7 @@ v0.1 takes Claude Code's own export, sent directly by managed settings: logs and
 
 - `metrics-never-turns`(approved): A metric data point never creates, changes, or joins a turn, and no metric value adds to a session's usage, because Claude Code reports the same API calls as `claude_code.api_request` log records and adding both would count them twice.
 - `claude-code-session-activity`(approved): From Claude Code's metrics the endpoint stores, per session and engineer, the totals of `claude_code.lines_of_code.count` by `type`, `claude_code.commit.count`, `claude_code.pull_request.count`, and `claude_code.active_time.total` by `type`.
-- `claude-code-usage-metrics-for-coverage`(approved): The endpoint stores, per session, the totals of `claude_code.token.usage` by `type`, `model`, and `query_source`, and of `claude_code.cost.usage` by `model` and `query_source`, only to measure how much of each session's usage reached Neo.Tax as turns.
+- `claude-code-usage-metrics-for-coverage`(approved): The endpoint stores, per session, the totals of `claude_code.token.usage` by `type`, `model`, `query_source`, and `speed`, and of `claude_code.cost.usage` by `model`, `query_source`, and `speed`, only to measure how much of each session's usage reached Neo.Tax as turns.
 - `claude-code-other-metrics-dropped`(approved): Every other Claude Code metric, including `claude_code.session.count` and `claude_code.code_edit_tool.decision`, is dropped and is not counted as rejected.
 - `delta-accepted`(approved): A claimed metric is accepted as a monotonic sum in delta temporality. A claimed metric of any other type or temporality is rejected.
 - `metric-point-idempotent`(approved): A re-exported delta data point adds nothing: it is keyed by its series, start time, and end time.

@@ -5,7 +5,7 @@ owner:
   - Firas Abuzaid
 created: 2026-10-24
 updated: 2026-11-14
-version: 9
+version: 10
 affects:
   - contract/*.schema.json
   - contract/*.go
@@ -34,7 +34,7 @@ The plugin's ingest endpoint is one of Neo.Tax's two entry points into the sessi
 - `envelope-fields`(tested): Every session event carries `contract_version`, `device_id`, `harness`, `harness_version`, `agent_version`, `session_id`, `event_kind`, and `sent_at`, and no other envelope field.
 - `opened-fields`(tested): A `session.opened` event carries `started_at`, `entrypoint`, `source`, `repo`, `branch`, `head_sha`, `git_user_email`, and `dropped_events`.
 - `turn-fields`(tested): A `session.turn` event carries `message_id`, `request_id`, `subagent_id`, `timestamp`, `model`, `branch`, `head_sha`, and `usage`.
-- `usage-shape`(tested): `usage` carries `input`, `output`, `cache_write_5m`, `cache_write_1h`, `cache_read`, `service_tier`, and `source`, where `source` is one of `payload`, `transcript`, or `unknown`, and every count is null when `source` is `unknown`.
+- `usage-shape`(tested): `usage` carries `input`, `output`, `cache_write_5m`, `cache_write_1h`, `cache_read`, `service_tier`, `speed`, and `source`, where `speed` is the speed the harness reports the call ran at (Claude Code: `standard` or `fast`) or null when it reports none, and `source` is one of `payload`, `transcript`, or `unknown`, and every count is null when `source` is `unknown`.
 - `pr-opened-fields`(tested): A `session.pr_opened` event carries `repo`, `number`, and `timestamp`.
 - `closed-fields`(tested): A `session.closed` event carries `ended_at`, `reason`, `dropped_events`, and `side_usage`.
 - `side-usage-shape`(tested): `side_usage` is null when the harness recorded no session totals, or when they cannot be matched to the session's turns, else an array with at most one entry per model, each carrying `model` and the non-negative integer counts `input`, `output`, `cache_write_5m`, `cache_write_1h`, and `cache_read`.

@@ -22,7 +22,9 @@ The code that runs on an engineer's machine to observe AI coding sessions and re
 
 **Subagent**: A child agent a harness spawns inside a session, with its own transcript and message ids but no session of its own. _Avoid_: sidechain, child session, sub-session _Avoid_: request, response, step
 
-**Usage**: The token counts and pricing attributes of one turn (input, output, cache write by TTL, cache read, service tier), with a source of payload, transcript, or unknown. _Avoid_: cost, spend (those are dollars, computed server-side)
+**Usage**: The token counts and pricing attributes of one turn (input, output, cache write by TTL, cache read, service tier, speed), with a source of payload, transcript, or unknown. _Avoid_: cost, spend (those are dollars, computed server-side)
+
+**Speed**: Whether a call ran in a vendor's fast mode, which is the same model at a higher price per token, or at standard speed. It is chosen per call, since fast mode falls back to standard speed when rate-limited, so it is part of a turn's usage rather than of its model. _Avoid_: tier (service tier is a separate attribute), priority
 
 **Side usage**: The usage of a session's model calls that produced no turn of their own (in Claude Code: the session title, the recap after time away, compaction's summary), reported per model on `session.closed` as the harness's session totals less every turn. _Avoid_: overhead, hidden usage, background usage
 

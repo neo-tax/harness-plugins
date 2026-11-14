@@ -73,6 +73,7 @@ type transcriptUsage struct {
 	CacheCreationInputTokens *int64  `json:"cache_creation_input_tokens"`
 	CacheReadInputTokens     *int64  `json:"cache_read_input_tokens"`
 	ServiceTier              *string `json:"service_tier"`
+	Speed                    *string `json:"speed"`
 	CacheCreation            *struct {
 		Ephemeral5m *int64 `json:"ephemeral_5m_input_tokens"`
 		Ephemeral1h *int64 `json:"ephemeral_1h_input_tokens"`
@@ -104,7 +105,7 @@ func mapUsage(raw json.RawMessage) contract.Usage {
 	}
 	out := contract.Usage{
 		Input: zero(u.InputTokens), Output: zero(u.OutputTokens), CacheRead: zero(u.CacheReadInputTokens),
-		ServiceTier: u.ServiceTier, Source: contract.UsageSourceTranscript,
+		ServiceTier: u.ServiceTier, Speed: u.Speed, Source: contract.UsageSourceTranscript,
 	}
 	if u.CacheCreation != nil {
 		out.CacheWrite5m, out.CacheWrite1h = zero(u.CacheCreation.Ephemeral5m), zero(u.CacheCreation.Ephemeral1h)

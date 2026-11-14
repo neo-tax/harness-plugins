@@ -38,7 +38,7 @@ func repo() map[string]any {
 func usage() map[string]any {
 	return map[string]any{
 		"input": 2, "output": 200, "cache_write_5m": 0, "cache_write_1h": 13707,
-		"cache_read": 29105, "service_tier": "standard", "source": "transcript",
+		"cache_read": 29105, "service_tier": "standard", "speed": "standard", "source": "transcript",
 	}
 }
 
@@ -162,7 +162,7 @@ func TestSideUsageNullOrEmpty(t *testing.T) {
 func TestUnknownUsageHasNullCounts(t *testing.T) {
 	ev := with(validTurn(), map[string]any{"usage": map[string]any{
 		"input": nil, "output": nil, "cache_write_5m": nil, "cache_write_1h": nil,
-		"cache_read": nil, "service_tier": nil, "source": "unknown",
+		"cache_read": nil, "service_tier": nil, "speed": nil, "source": "unknown",
 	}})
 	if err := contract.ValidateEvent(marshal(t, ev)); err != nil {
 		t.Fatal(err)

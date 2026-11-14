@@ -76,6 +76,7 @@ var byKind = map[string][]Field{
 			{"cache_write_1h", "Input tokens written to the one-hour prompt cache.", nil, false},
 			{"cache_read", "Input tokens read from the prompt cache.", nil, false},
 			{"service_tier", "Vendor service tier the request ran on.", nil, false},
+			{"speed", "Speed the request ran at, standard or fast, which sets its price per token.", nil, false},
 			{"source", "Where the counts came from: payload, transcript, or unknown.", nil, false},
 		}, false},
 	},

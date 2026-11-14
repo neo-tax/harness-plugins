@@ -50,7 +50,7 @@
     "lowercase": { "type": "string", "minLength": 1, "pattern": "^[^A-Z]+$" },
     "usage": {
       "type": "object",
-      "required": ["input", "output", "cache_write_5m", "cache_write_1h", "cache_read", "service_tier", "source"],
+      "required": ["input", "output", "cache_write_5m", "cache_write_1h", "cache_read", "service_tier", "speed", "source"],
       "properties": {
         "input": { "$ref": "#/$defs/count" },
         "output": { "$ref": "#/$defs/count" },
@@ -58,6 +58,7 @@
         "cache_write_1h": { "$ref": "#/$defs/count" },
         "cache_read": { "$ref": "#/$defs/count" },
         "service_tier": { "$ref": "#/$defs/nullable_string" },
+        "speed": { "$ref": "#/$defs/nullable_string" },
         "source": { "enum": ["payload", "transcript", "unknown"] }
       },
       "additionalProperties": false,

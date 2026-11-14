@@ -108,6 +108,7 @@ Prompt text, completion text, tool inputs, tool outputs, file paths, the working
 | `usage.cache_write_1h` | Input tokens written to the one-hour prompt cache. |
 | `usage.cache_read` | Input tokens read from the prompt cache. |
 | `usage.service_tier` | Vendor service tier the request ran on. |
+| `usage.speed` | Speed the request ran at, standard or fast, which sets its price per token. |
 | `usage.source` | Where the counts came from: payload, transcript, or unknown. |
 
 ## At enrollment
