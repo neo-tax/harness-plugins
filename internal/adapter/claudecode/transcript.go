@@ -146,7 +146,7 @@ func readTail(ctx Context, path string, c cursor.Cursor, subagentID *string) (ta
 	// server's idempotency key discard what it has already seen.
 	head := firstLineID(f)
 	if fi.Size() < c.Offset || (c.Offset > 0 && c.Head != head) {
-		c = cursor.Cursor{Version: c.Version}
+		c = cursor.Cursor{Version: c.Version, Since: c.Since}
 	}
 	c.Head = head
 	out.cursor = c
@@ -182,12 +182,12 @@ func readTail(ctx Context, path string, c cursor.Cursor, subagentID *string) (ta
 		case l.Type == "assistant" && l.Message != nil && l.Message.ID != "":
 			id := l.Message.ID
 			out.cursor.MessageID = id
-			if seen[id] {
+			if seen[id] || copiedFromParent(c, l) {
 				continue
 			}
 			seen[id] = true
 			out.events = append(out.events, ctx.turn(l, subagentID, out.cursor.Version))
-		case l.Type == "pr-link" && l.PRNumber > 0:
+		case l.Type == "pr-link" && l.PRNumber > 0 && !copiedFromParent(c, l):
 			// @spec: claude-code-transcript-parser#pr-link-lines
 			out.events = append(out.events, contract.NewPROpened(ctx.envelope(out.cursor.Version), contract.PROpenedFields{
 				Repo: prRepo(l.PRRepository, l.PRURL), Number: l.PRNumber, Timestamp: l.Timestamp.UTC(),
@@ -195,6 +195,14 @@ func readTail(ctx Context, path string, c cursor.Cursor, subagentID *string) (ta
 		}
 	}
 	return out, nil
+}
+
+// copiedFromParent reports whether a fork's line predates the fork, so
+// Claude Code copied it from the parent session, whose own hooks sent it.
+//
+// @spec: claude-code-transcript-parser#fork-skips-copied-lines
+func copiedFromParent(c cursor.Cursor, l line) bool {
+	return !c.Since.IsZero() && l.Timestamp.Before(c.Since)
 }
 
 // firstLineID is a short hash of a file's first line, capped at its first
@@ -298,8 +306,15 @@ func tailWith(ctx Context, mainPath string, cursors map[string]cursor.Cursor) (R
 	moves := map[string]cursor.Cursor{}
 	var res Result
 	var errs []error
+	// A fork's start applies to its subagent transcripts too, in case
+	// Claude Code copies the parent's along with the main one.
+	since := cursors[mainPath].Since
 	read := func(path string, sub *string) {
-		t, err := readTail(ctx, path, cursors[path], sub)
+		c := cursors[path]
+		if c.Since.IsZero() {
+			c.Since = since
+		}
+		t, err := readTail(ctx, path, c, sub)
 		if err != nil {
 			errs = append(errs, err)
 			return

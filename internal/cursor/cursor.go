@@ -26,6 +26,10 @@ type Cursor struct {
 	// Head identifies the transcript's first line, so a rewrite of the file
 	// is detected even when it is no shorter than Offset.
 	Head string `json:"head,omitempty"`
+	// Since, set when a fork's session starts, is the time before which the
+	// transcript's lines were copied from the parent session, so reads skip
+	// the turns and pull requests timestamped before it.
+	Since time.Time `json:"since,omitzero"`
 }
 
 // Store is the cursor file of one plugin data directory.
@@ -64,12 +68,19 @@ func (s *Store) Update(updates map[string]Cursor) error {
 	for path, c := range updates {
 		m[path] = c
 	}
-	for path := range m {
-		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+	for path, c := range m {
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) && !pendingFork(c) {
 			delete(m, path)
 		}
 	}
 	return s.write(m)
+}
+
+// pendingFork reports whether c is a fork's cursor recorded at its start
+// whose transcript Claude Code may not have written yet. It is kept for a
+// day, after which a fork that never wrote is forgotten.
+func pendingFork(c Cursor) bool {
+	return c.Offset == 0 && !c.Since.IsZero() && time.Since(c.Since) < 24*time.Hour
 }
 
 // Merge records cursors without moving any stored cursor backwards: a

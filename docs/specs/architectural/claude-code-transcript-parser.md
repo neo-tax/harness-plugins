@@ -5,7 +5,7 @@ owner:
   - Firas Abuzaid
 created: 2026-10-24
 updated: 2026-11-14
-version: 7
+version: 8
 affects:
   - internal/adapter/claudecode/*.go
   - internal/cursor/*.go
@@ -24,6 +24,7 @@ Governs how the Claude Code adapter turns hook payloads and on-disk transcripts 
 - `hook-exec-shape`(tested): Each hook execs the agent with the hook name on the command line and the harness's JSON payload on standard input.
 - `opened-on-session-start`(tested): `SessionStart` produces one `session.opened` event whose `source` is the harness's startup, resume, or fork reason and whose `entrypoint` is the harness's reported entry point.
 - `turns-from-transcript-tail`(tested): On `Stop`, `PreCompact`, and `SessionEnd`, the adapter reads the session transcript from its stored cursor to the end and emits one `session.turn` per assistant message not yet emitted.
+- `fork-skips-copied-lines`(tested): At a `SessionStart` whose `source` is fork, the adapter records the hook's time against the session's transcript, and its reads of that transcript and its subagent transcripts skip assistant and pull-request lines timestamped before it, which Claude Code copied from the parent session. The record is kept until the transcript is written, for up to a day. A backfill resets it and reads a fork from the start.
 - `dedupe-by-message-id`(tested): An assistant message that spans several transcript lines produces exactly one turn, keyed by the message id, because every line of that message repeats the same usage block.
 - `usage-mapping`(tested): A turn's `usage` maps the transcript's input, output, cache-read, and cache-creation counts, with cache creation split into the five-minute and one-hour entries the transcript reports, and `service_tier` as reported.
 - `usage-source-transcript`(tested): A turn whose counts came from the transcript carries `usage.source` as `transcript`.
@@ -54,7 +55,7 @@ A transcript that reports cache creation without the five-minute and one-hour sp
 
 Claude Code cancels a synchronous `SessionEnd` hook 1.5 seconds after it starts, and a plugin hook's own `timeout` does not extend that. An async hook is not canceled: it keeps running after Claude Code exits. A probe hook that ran for 14 seconds finished on Claude Code 2.1.322 (macOS) after `claude -p`, after `/exit`, and after the terminal was closed, while the same hook registered synchronously got SIGTERM at 1.5 seconds each time. `SessionEnd` relies on this: it waits up to 30 seconds for the cursor lock, because a tail it skips is recovered only by a backfill, and an engineer runs a backfill rarely.
 
-Resume and fork keep the harness's session id semantics: a resumed session reuses its id and produces a `session.opened` with `source` resume; a fork is a new session id with `source` fork. The server's idempotency key makes re-reading a resumed transcript harmless.
+Resume and fork keep the harness's session id semantics: a resumed session reuses its id and produces a `session.opened` with `source` resume; a fork is a new session id with `source` fork. The server's idempotency key makes re-reading a resumed transcript harmless. A fork's transcript begins with copies of the parent's lines, unmarked and with the parent's timestamps, which the parent's own hooks have already sent; skipping lines older than the fork's `SessionStart` keeps the fork from re-sending them under its own id.
 
 Claude Code makes API calls that never become an assistant message in the transcript: the session title, the recap after the engineer has been away, and compaction's summary. Their usage appears nowhere in the transcript except in the session totals Claude Code writes as a `cost-state` line on exit, before `SessionEnd` fires. A usage audit through a recording proxy found those totals equal to the API's own counts for every request in the session, side calls and subagents included. Across 254 real sessions, the totals carried across `--resume` and only ever grew, except when a second process opened the same session: that process keeps a separate tally under its own `startTime`, which is why tallies are summed rather than the last line taken. One older version (2.1.284) recorded less than its subagent turns alone; clamping each count at zero means that case under-reports instead of reporting negative usage, and it was under 2% of the sample's tokens. In 253 of 256 sessions nothing followed the final `cost-state` line, and in the other three only an `artifact-comment-monitor` line did; a superseded line was always followed by the resumed process's own lines, almost always starting with `last-prompt`. A new kind of line written after exit would make `side_usage` null, which the server's null rate per harness version would show.
 

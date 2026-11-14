@@ -356,3 +356,73 @@ func TestForkCopiesAreDuplicates(t *testing.T) {
 		}
 	}
 }
+
+func openedAs(deviceID, session, source string, at time.Time) contract.Opened {
+	env := turn(deviceID, "x").Envelope
+	env.SessionID = session
+	return contract.NewOpened(env, contract.OpenedFields{StartedAt: at, Source: &source})
+}
+
+func turnIn(deviceID, session, msgID string) contract.Turn {
+	t := turn(deviceID, msgID)
+	t.SessionID = session
+	return t
+}
+
+func ownerOf(h *harness, msgID string) any {
+	for _, ev := range h.recorded() {
+		if ev["message_id"] == msgID {
+			return ev["session_id"]
+		}
+	}
+	return nil
+}
+
+// A backfill sends the newest transcript first, so a fork's copies of its
+// parent's turns often arrive before the parent's own. The turn still goes
+// to the parent.
+// @spec: session-event-wire-contract#shared-event-owner
+func TestSharedTurnGoesToTheParentWhicheverArrivesFirst(t *testing.T) {
+	t0 := time.Date(2026, 10, 25, 9, 0, 0, 0, time.UTC)
+	for _, order := range []string{"fork first", "parent first"} {
+		h := start(t, fakeingest.Options{})
+		er := h.enroll()
+		fork := []any{openedAs(er.DeviceID, "s-fork", "fork", t0.Add(time.Hour)), turnIn(er.DeviceID, "s-fork", "msg_1"), turnIn(er.DeviceID, "s-fork", "msg_2")}
+		parent := []any{openedAs(er.DeviceID, "s-parent", "startup", t0), turnIn(er.DeviceID, "s-parent", "msg_1")}
+		if order == "fork first" {
+			h.ingest(er.DeviceKey, fork...)
+			h.ingest(er.DeviceKey, parent...)
+		} else {
+			h.ingest(er.DeviceKey, parent...)
+			h.ingest(er.DeviceKey, fork...)
+		}
+		if got := ownerOf(h, "msg_1"); got != "s-parent" {
+			t.Errorf("%s: msg_1 belongs to %v, want s-parent", order, got)
+		}
+		if got := ownerOf(h, "msg_2"); got != "s-fork" {
+			t.Errorf("%s: msg_2 belongs to %v, want s-fork", order, got)
+		}
+		if n := len(h.recorded()); n != 4 {
+			t.Errorf("%s: %d events stored, want 4", order, n)
+		}
+	}
+}
+
+// Without a fork among them, the session that started first owns a shared
+// turn, and a session.opened arriving after the turn moves it.
+// @spec: session-event-wire-contract#shared-event-owner
+func TestSharedTurnGoesToTheEarliestSession(t *testing.T) {
+	t0 := time.Date(2026, 10, 25, 9, 0, 0, 0, time.UTC)
+	h := start(t, fakeingest.Options{})
+	er := h.enroll()
+	// "s-a" sorts first, so before any session.opened it owns the turn.
+	h.ingest(er.DeviceKey, turnIn(er.DeviceID, "s-b", "msg_1"), turnIn(er.DeviceID, "s-a", "msg_1"))
+	if got := ownerOf(h, "msg_1"); got != "s-a" {
+		t.Fatalf("before any opened, msg_1 belongs to %v", got)
+	}
+	h.ingest(er.DeviceKey, openedAs(er.DeviceID, "s-a", "startup", t0.Add(time.Hour)))
+	h.ingest(er.DeviceKey, openedAs(er.DeviceID, "s-b", "resume", t0))
+	if got := ownerOf(h, "msg_1"); got != "s-b" {
+		t.Fatalf("msg_1 belongs to %v, want the earlier s-b", got)
+	}
+}

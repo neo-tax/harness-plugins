@@ -31,7 +31,9 @@ type Options struct {
 	IngestBaseURL string
 	// StallFor is how long the stall fault holds a request. Defaults to 30s.
 	StallFor time.Duration
-	// Record, when set, receives one JSON line per accepted event.
+	// Record, when set, receives one JSON line per accepted event, as it
+	// was first accepted; a shared event later filed under another session
+	// (see owners) is not rewritten there, but GET /_fake/events shows it.
 	Record io.Writer
 	// RecordDuplicates, when set, receives one JSON line per event dropped
 	// as a duplicate, so a caller can see what was re-sent, not only how
@@ -75,8 +77,9 @@ type Server struct {
 	mu          sync.Mutex
 	devices     []*device
 	byKey       map[string]*device
-	seen        map[string]bool
+	seen        map[string]int // idempotency key to its index in events
 	events      []json.RawMessage
+	owners      owners
 	otlpRecords []json.RawMessage
 	fault       string
 	faultLeft   int
@@ -87,7 +90,7 @@ func New(opts Options) *Server {
 	if opts.StallFor == 0 {
 		opts.StallFor = 30 * time.Second
 	}
-	s := &Server{opts: opts, mux: http.NewServeMux(), byKey: map[string]*device{}, seen: map[string]bool{}}
+	s := &Server{opts: opts, mux: http.NewServeMux(), byKey: map[string]*device{}, seen: map[string]int{}, owners: newOwners()}
 	s.mux.HandleFunc("POST /v1/enroll", s.enroll)
 	s.mux.HandleFunc("POST /v1/events", s.ingest)
 	s.mux.HandleFunc("POST /otlp/v1/logs", s.otlp(signalLogs))
@@ -291,15 +294,24 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		k := idempotencyKey(ev)
-		if s.seen[k] {
+		if idx, ok := s.seen[k]; ok {
+			if s.owners.report(k, ev, raw) {
+				s.events[idx] = s.owners.best(k)
+			}
 			resp.Duplicates++
 			if s.opts.RecordDuplicates != nil {
 				s.opts.RecordDuplicates.Write(append(append([]byte{}, raw...), '\n'))
 			}
 			continue
 		}
-		s.seen[k] = true
+		s.seen[k] = len(s.events)
 		s.events = append(s.events, raw)
+		s.owners.report(k, ev, raw)
+		if ev["event_kind"] == contract.KindOpened {
+			for _, moved := range s.owners.opened(ev) {
+				s.events[s.seen[moved]] = s.owners.best(moved)
+			}
+		}
 		resp.Accepted++
 		if s.opts.Record != nil {
 			s.opts.Record.Write(append(append([]byte{}, raw...), '\n'))
@@ -320,7 +332,7 @@ func (s *Server) listEvents(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) resetEvents(w http.ResponseWriter, _ *http.Request) {
 	s.mu.Lock()
-	s.events, s.seen = nil, map[string]bool{}
+	s.events, s.seen, s.owners = nil, map[string]int{}, newOwners()
 	s.mu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
 }

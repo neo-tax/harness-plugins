@@ -189,6 +189,18 @@ func emit(a *agent.Agent, name string, p payload, o HookOptions) error {
 			DroppedEvents: dropped,
 		}))
 		carried = dropped
+		// A fork's transcript starts with copies of its parent's lines,
+		// which the parent's hooks already sent. Recording the start lets
+		// this session's reads skip them.
+		//
+		// @spec: claude-code-transcript-parser#fork-skips-copied-lines
+		if locked && p.Source == "fork" {
+			if _, ok := store.All()[p.TranscriptPath]; !ok {
+				if err := store.Put(p.TranscriptPath, cursor.Cursor{Since: ctx.Now.UTC()}); err != nil {
+					agent.Logf(o.DataDir, "hook=%s fork start not recorded: %s", name, errClass(err))
+				}
+			}
+		}
 	case "Stop", "PreCompact", "SessionEnd":
 		if locked {
 			res, err := TailEvents(ctx, p.TranscriptPath, store)
