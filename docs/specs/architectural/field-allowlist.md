@@ -51,3 +51,4 @@ Generating the statement from code is what lets the answer to a security questio
 ## Risks
 
 - **A field description in the generated statement is too terse to satisfy a security reviewer.** Mitigated by the descriptions living beside the allowlist entries and being reviewed as part of the same change.
+- **Refused events are invisible to Neo.Tax.** An event refused under `values-validated-before-queue` is dropped whole, and the count of refusals stays in the agent's local queue state. It is never sent, because reporting it needs the engineer's consent, so a bug that rejects every event of one kind shows up on the server only as missing usage. Accepted; the local count is there for debugging on the machine.
