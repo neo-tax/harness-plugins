@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -423,12 +422,19 @@ func withCursorLock(store *cursor.Store, fn func() error) error {
 // would open a session named agent-<id> and count its turns as main-thread
 // turns.
 //
+// A transcript's file name becomes its session id, so only files named as
+// Claude Code names them, a UUID, are read. Anything else under projects/
+// (a hand-made copy, a renamed backup) is skipped rather than sending its
+// file name in an event. The legacy agent-<id>.jsonl files fail the same
+// check.
+//
 // @spec: session-event-wire-contract#subagent-turns-belong-to-parent
+// @spec: event-queue-and-backfill#backfill-session-id-from-harness
 func mainTranscripts(projectsDir string) []transcript {
 	all, _ := filepath.Glob(filepath.Join(projectsDir, "*", "*.jsonl"))
 	var ts []transcript
 	for _, p := range all {
-		if strings.HasPrefix(filepath.Base(p), "agent-") {
+		if !isSessionID(sessionIDOf(p)) {
 			continue
 		}
 		t := transcript{path: p}
@@ -546,4 +552,25 @@ func backfillOne(a *agent.Agent, path, deviceID string, o BackfillOptions) (int,
 func sessionIDOf(path string) string {
 	base := filepath.Base(path)
 	return base[:len(base)-len(filepath.Ext(base))]
+}
+
+// isSessionID reports whether s has the shape of a Claude Code session id:
+// a UUID in its canonical lowercase hyphenated form.
+func isSessionID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, r := range s {
+		switch i {
+		case 8, 13, 18, 23:
+			if r != '-' {
+				return false
+			}
+		default:
+			if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+				return false
+			}
+		}
+	}
+	return true
 }

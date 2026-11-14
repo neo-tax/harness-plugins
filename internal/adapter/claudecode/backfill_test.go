@@ -28,11 +28,11 @@ func projects(t *testing.T, repo string) string {
 	src, _ := os.ReadFile("testdata/fixtures/synthetic-2.1.310/fixture-session.jsonl")
 	src = bytes.ReplaceAll(src, []byte(`"cwd":"/Users/someone/client-acme"`), []byte(`"cwd":"`+repo+`"`))
 	sub, _ := os.ReadFile("testdata/fixtures/synthetic-2.1.310/fixture-session/subagents/agent-sub1.jsonl")
-	old := filepath.Join(proj, "old-session.jsonl")
+	old := filepath.Join(proj, "11111111-1111-4111-8111-111111111111.jsonl")
 	os.WriteFile(old, src, 0o600)
-	os.MkdirAll(filepath.Join(proj, "old-session", "subagents"), 0o700)
-	os.WriteFile(filepath.Join(proj, "old-session", "subagents", "agent-sub1.jsonl"), sub, 0o600)
-	newer := filepath.Join(proj, "new-session.jsonl")
+	os.MkdirAll(filepath.Join(proj, "11111111-1111-4111-8111-111111111111", "subagents"), 0o700)
+	os.WriteFile(filepath.Join(proj, "11111111-1111-4111-8111-111111111111", "subagents", "agent-sub1.jsonl"), sub, 0o600)
+	newer := filepath.Join(proj, "22222222-2222-4222-8222-222222222222.jsonl")
 	os.WriteFile(newer, []byte(`{"type":"user","timestamp":"2026-10-26T09:00:00Z","cwd":"`+repo+`","gitBranch":"b2","entrypoint":"sdk-ts","version":"2.1.310","message":{"content":"hi"}}
 {"type":"assistant","timestamp":"2026-10-26T09:00:01Z","gitBranch":"b2","version":"2.1.310","requestId":"req_N","message":{"id":"msg_N","model":"m","usage":{"input_tokens":1,"output_tokens":1}}}
 `), 0o600)
@@ -64,7 +64,7 @@ func TestBackfillEmitsEveryTranscriptNewestFirst(t *testing.T) {
 			sessions = append(sessions, e["session_id"].(string))
 		}
 	}
-	if strings.Join(sessions, ",") != "new-session,old-session" {
+	if strings.Join(sessions, ",") != "22222222-2222-4222-8222-222222222222,11111111-1111-4111-8111-111111111111" {
 		t.Fatalf("opened order %v", sessions)
 	}
 	if k := strings.Join(kinds(got), ","); k != "session.opened,session.turn,session.opened,session.turn,session.turn,session.pr_opened,session.turn,session.turn" {
@@ -114,7 +114,7 @@ func TestRerunResetsCursorsAndResends(t *testing.T) {
 	root := projects(t, h.repo)
 	h.backfill(root)
 	first := len(h.recorded())
-	main := filepath.Join(root, "projects", "-some-project", "new-session.jsonl")
+	main := filepath.Join(root, "projects", "-some-project", "22222222-2222-4222-8222-222222222222.jsonl")
 	if c := cursor.Open(h.data).Get(main); c.Offset == 0 {
 		t.Fatal("cursor not advanced by backfill")
 	}
@@ -130,8 +130,8 @@ func TestHookAfterBackfillSendsOnlyNewTurns(t *testing.T) {
 	root := projects(t, h.repo)
 	h.backfill(root)
 	before := len(h.recorded())
-	h.transcript = filepath.Join(root, "projects", "-some-project", "new-session.jsonl")
-	h.run("Stop", map[string]any{"session_id": "new-session"})
+	h.transcript = filepath.Join(root, "projects", "-some-project", "22222222-2222-4222-8222-222222222222.jsonl")
+	h.run("Stop", map[string]any{"session_id": "22222222-2222-4222-8222-222222222222"})
 	if got := len(h.recorded()); got != before {
 		t.Fatalf("hook re-sent %d events", got-before)
 	}
@@ -160,7 +160,7 @@ func manySessions(t *testing.T, repo string, n int) string {
 	os.MkdirAll(proj, 0o700)
 	base := time.Now().Add(-time.Hour)
 	for i := range n {
-		id := fmt.Sprintf("session-%03d", i)
+		id := fmt.Sprintf("00000000-0000-4000-8000-%012d", i)
 		path := filepath.Join(proj, id+".jsonl")
 		os.WriteFile(path, []byte(`{"type":"user","timestamp":"2026-10-26T09:00:00Z","cwd":"`+repo+`","gitBranch":"b","entrypoint":"cli","version":"2.1.310","message":{"content":"hi"}}
 {"type":"assistant","timestamp":"2026-10-26T09:00:01Z","gitBranch":"b","version":"2.1.310","requestId":"req_`+id+`","message":{"id":"msg_`+id+`","model":"m","usage":{"input_tokens":1,"output_tokens":1}}}
@@ -274,13 +274,13 @@ func TestBackfillResumesAfterPause(t *testing.T) {
 	queued := st.Sessions
 	// Rewrite the newest session, which the paused run queued, keeping its
 	// modification time: a resumed run that re-read it would send msg_X.
-	newest := filepath.Join(proj, "session-000.jsonl")
+	newest := filepath.Join(proj, "00000000-0000-4000-8000-000000000000.jsonl")
 	fi, _ := os.Stat(newest)
 	os.WriteFile(newest, []byte(`{"type":"user","timestamp":"2026-10-26T09:00:00Z","cwd":"`+h.repo+`","version":"2.1.310","message":{"content":"x"}}
 {"type":"assistant","timestamp":"2026-10-26T09:00:01Z","version":"2.1.310","requestId":"req_X","message":{"id":"msg_X","model":"m","usage":{"input_tokens":1,"output_tokens":1}}}
 `), 0o600)
 	os.Chtimes(newest, fi.ModTime(), fi.ModTime())
-	cursorBefore := cursor.Open(h.data).Get(filepath.Join(proj, "session-001.jsonl"))
+	cursorBefore := cursor.Open(h.data).Get(filepath.Join(proj, "00000000-0000-4000-8000-000000000001.jsonl"))
 	if cursorBefore.Offset == 0 {
 		t.Fatal("setup: paused run recorded no cursor for a queued transcript")
 	}
@@ -304,10 +304,10 @@ func TestBackfillResumesAfterPause(t *testing.T) {
 			t.Fatal("resumed run re-read a transcript the paused run queued")
 		}
 	}
-	if c := cursor.Open(h.data).Get(filepath.Join(proj, "session-001.jsonl")); c != cursorBefore {
+	if c := cursor.Open(h.data).Get(filepath.Join(proj, "00000000-0000-4000-8000-000000000001.jsonl")); c != cursorBefore {
 		t.Errorf("queued transcript's cursor changed: %+v -> %+v", cursorBefore, c)
 	}
-	if c := cursor.Open(h.data).Get(filepath.Join(proj, fmt.Sprintf("session-%03d.jsonl", n-1))); c.Offset == 0 {
+	if c := cursor.Open(h.data).Get(filepath.Join(proj, fmt.Sprintf("00000000-0000-4000-8000-%012d.jsonl", n-1))); c.Offset == 0 {
 		t.Error("oldest transcript's cursor not advanced by the resumed run")
 	}
 	if st, _ := claudecode.ReadBackfillStatus(h.data); st.Paused || st.Resume != nil || st.Sessions != n {
@@ -332,7 +332,7 @@ func TestBackfillResumesAfterBeingKilled(t *testing.T) {
 	st.Paused, st.FinishedAt = false, time.Time{}
 	b, _ := json.Marshal(st)
 	os.WriteFile(filepath.Join(h.data, "backfill.json"), b, 0o600)
-	newest := filepath.Join(root, "projects", "-many", "session-000.jsonl")
+	newest := filepath.Join(root, "projects", "-many", "00000000-0000-4000-8000-000000000000.jsonl")
 	fi, _ := os.Stat(newest)
 	os.WriteFile(newest, []byte(`{"type":"user","timestamp":"2026-10-26T09:00:00Z","cwd":"`+h.repo+`","version":"2.1.310","message":{"content":"x"}}
 {"type":"assistant","timestamp":"2026-10-26T09:00:01Z","version":"2.1.310","requestId":"req_X","message":{"id":"msg_X","model":"m","usage":{"input_tokens":1,"output_tokens":1}}}
@@ -418,12 +418,12 @@ func TestBackfillResumesWithinTiedModificationTimes(t *testing.T) {
 func TestBackfillKeepsSessionWhenASubagentIsUnreadable(t *testing.T) {
 	h := newHookEnv(t, true)
 	root := projects(t, h.repo)
-	bad := filepath.Join(root, "projects", "-some-project", "old-session", "subagents", "agent-bad.jsonl")
+	bad := filepath.Join(root, "projects", "-some-project", "11111111-1111-4111-8111-111111111111", "subagents", "agent-bad.jsonl")
 	os.MkdirAll(bad, 0o700) // a directory where a file is expected: reading it fails
 	h.backfill(root)
 	var oldOpened bool
 	for _, e := range h.recorded() {
-		if e["session_id"] == "old-session" && e["event_kind"] == "session.opened" {
+		if e["session_id"] == "11111111-1111-4111-8111-111111111111" && e["event_kind"] == "session.opened" {
 			oldOpened = true
 		}
 	}
@@ -472,8 +472,8 @@ func TestBackfillSkipsLegacySubagentTranscripts(t *testing.T) {
 	h := newHookEnv(t, true)
 	root := projects(t, h.repo)
 	legacy := filepath.Join(root, "projects", "-some-project", "agent-legacy1.jsonl")
-	os.WriteFile(legacy, []byte(`{"type":"user","isSidechain":true,"sessionId":"new-session","agentId":"legacy1","timestamp":"2026-10-26T09:00:02Z","cwd":"`+h.repo+`","version":"2.1.310","message":{"content":"x"}}
-{"type":"assistant","isSidechain":true,"sessionId":"new-session","agentId":"legacy1","timestamp":"2026-10-26T09:00:03Z","version":"2.1.310","requestId":"req_L","message":{"id":"msg_L","model":"m","usage":{"input_tokens":1,"output_tokens":1}}}
+	os.WriteFile(legacy, []byte(`{"type":"user","isSidechain":true,"sessionId":"22222222-2222-4222-8222-222222222222","agentId":"legacy1","timestamp":"2026-10-26T09:00:02Z","cwd":"`+h.repo+`","version":"2.1.310","message":{"content":"x"}}
+{"type":"assistant","isSidechain":true,"sessionId":"22222222-2222-4222-8222-222222222222","agentId":"legacy1","timestamp":"2026-10-26T09:00:03Z","version":"2.1.310","requestId":"req_L","message":{"id":"msg_L","model":"m","usage":{"input_tokens":1,"output_tokens":1}}}
 `), 0o600)
 	out, err := h.backfill(root)
 	if err != nil {
@@ -485,6 +485,31 @@ func TestBackfillSkipsLegacySubagentTranscripts(t *testing.T) {
 		}
 		if e["message_id"] == "msg_L" && e["subagent_id"] == nil {
 			t.Fatalf("legacy subagent turn counted as a main-thread turn: %v", e)
+		}
+	}
+	if !strings.Contains(out, "2 sessions") {
+		t.Errorf("output %q", out)
+	}
+}
+
+// A transcript's file name becomes its session id, so a file under projects/
+// that Claude Code did not name, such as a hand-made backup, is skipped and
+// its name never reaches an event.
+// @spec: event-queue-and-backfill#backfill-session-id-from-harness
+func TestBackfillSkipsTranscriptsNotNamedBySessionID(t *testing.T) {
+	h := newHookEnv(t, true)
+	root := projects(t, h.repo)
+	src, _ := os.ReadFile(filepath.Join(root, "projects", "-some-project", "22222222-2222-4222-8222-222222222222.jsonl"))
+	for _, name := range []string{"acme-migration-backup.jsonl", "22222222-2222-4222-8222-22222222222Z.jsonl"} {
+		os.WriteFile(filepath.Join(root, "projects", "-some-project", name), src, 0o600)
+	}
+	out, err := h.backfill(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range h.recorded() {
+		if id, _ := e["session_id"].(string); id == "acme-migration-backup" || strings.HasSuffix(id, "Z") {
+			t.Fatalf("a file name was sent as a session id: %v", e)
 		}
 	}
 	if !strings.Contains(out, "2 sessions") {

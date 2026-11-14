@@ -302,7 +302,7 @@ func (w *world) pastSession() {
 	w.t.Helper()
 	dir := filepath.Join(w.config, "projects", "-past")
 	os.MkdirAll(dir, 0o700)
-	os.WriteFile(filepath.Join(dir, "past-session.jsonl"), []byte(`{"type":"user","timestamp":"2026-10-20T09:00:00Z","cwd":"`+w.repo+`","gitBranch":"old","version":"2.1.310","message":{"content":"x"}}
+	os.WriteFile(filepath.Join(dir, "33333333-3333-4333-8333-333333333333.jsonl"), []byte(`{"type":"user","timestamp":"2026-10-20T09:00:00Z","cwd":"`+w.repo+`","gitBranch":"old","version":"2.1.310","message":{"content":"x"}}
 {"type":"assistant","timestamp":"2026-10-20T09:00:01Z","gitBranch":"old","version":"2.1.310","message":{"id":"msg_P","model":"m","usage":{"input_tokens":3,"output_tokens":4}}}
 `), 0o600)
 }
@@ -336,7 +336,7 @@ func TestLoginStartsBackfill(t *testing.T) {
 	}
 	w.waitBackfill(time.Time{})
 	got := w.recorded()
-	if k := kinds(got); k != "opened,turn" || got[0]["session_id"] != "past-session" {
+	if k := kinds(got); k != "opened,turn" || got[0]["session_id"] != "33333333-3333-4333-8333-333333333333" {
 		t.Fatalf("recorded %s", k)
 	}
 }
