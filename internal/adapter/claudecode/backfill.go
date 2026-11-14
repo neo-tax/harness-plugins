@@ -38,11 +38,29 @@ type BackfillOptions struct {
 	Now          func() time.Time
 	HTTP         *http.Client
 	Out          io.Writer
-	// QueueLimit pauses the backfill once the queue holds this many bytes
-	// it could not send. Defaults to half the queue cap, so the cap never
-	// evicts the newest sessions a backfill queued first.
+	// QueueLimit is how many bytes the queue may hold before the backfill
+	// stops reading transcripts and waits for the queue to drain. Defaults
+	// to half the queue cap, so the cap never evicts the newest sessions a
+	// backfill queued first.
 	QueueLimit int64
+	// WaitBudget bounds the total time a backfill waits out ingest backoff
+	// before it pauses. Defaults to 24 hours.
+	WaitBudget time.Duration
+	// Sleep waits for d or until ctx is done. Defaults to a timer; tests
+	// replace it to advance a fake clock.
+	Sleep func(ctx context.Context, d time.Duration) error
+	// Restart ignores a paused backfill's resume point: every cursor is
+	// reset and every transcript is read again, newest first.
+	Restart bool
 }
+
+// DefaultWaitBudget is how long a backfill waits out ingest backoff, in
+// total, before it pauses.
+const DefaultWaitBudget = 24 * time.Hour
+
+// minRetry is the shortest wait between flushes while the queue is over its
+// limit: when no backoff is recorded, a hook holds the flush lock.
+const minRetry = 5 * time.Second
 
 // ConfigDir is Claude Code's configuration directory: $CLAUDE_CONFIG_DIR, or
 // ~/.claude.
@@ -54,14 +72,39 @@ func ConfigDir() string {
 	return filepath.Join(home, ".claude")
 }
 
-// Backfill resets every cursor and emits events for every Claude Code
-// transcript on disk, newest first, from the beginning, flushing as it
-// goes. It runs as its own command, never under a hook.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+// waitResult is how a wait for the queue to drain ended.
+type waitResult int
+
+const (
+	drained waitResult = iota
+	waitNeedsEnrollment
+	waitBudgetSpent
+	waitCanceled
+)
+
+// Backfill emits events for every Claude Code transcript on disk, newest
+// first, from the beginning, flushing as it goes. A full run resets every
+// cursor first; a run that follows a paused one resumes after the
+// transcripts the paused run queued, unless o.Restart is set. It runs as its
+// own command, never under a hook.
 //
 // @spec: event-queue-and-backfill#backfill-scope
 // @spec: event-queue-and-backfill#backfill-lock
 // @spec: event-queue-and-backfill#backfill-command
 // @spec: event-queue-and-backfill#backfill-idempotent-server-side
+// @spec: event-queue-and-backfill#backfill-waits-out-backoff
+// @spec: event-queue-and-backfill#backfill-resumes-after-pause
 func Backfill(ctx context.Context, o BackfillOptions) error {
 	if o.Now == nil {
 		o.Now = time.Now
@@ -74,6 +117,12 @@ func Backfill(ctx context.Context, o BackfillOptions) error {
 	}
 	if o.HTTP == nil {
 		o.HTTP = &http.Client{Timeout: 30 * time.Second}
+	}
+	if o.WaitBudget == 0 {
+		o.WaitBudget = DefaultWaitBudget
+	}
+	if o.Sleep == nil {
+		o.Sleep = sleepCtx
 	}
 	if err := CheckBackfill(o.DataDir); err != nil {
 		return err
@@ -110,18 +159,66 @@ func Backfill(ctx context.Context, o BackfillOptions) error {
 		defer cancel()
 		a.Queue.Flush(fctx, client)
 	}
-
-	store := cursor.Open(o.DataDir)
-	if err := withCursorLock(store, store.Reset); err != nil {
-		return err
+	// waitBelow flushes until the queue holds at most limit bytes, sleeping
+	// until each recorded next-attempt time, for at most the wait budget
+	// across the whole run.
+	var waited time.Duration
+	waitBelow := func(limit int64) waitResult {
+		for {
+			if a.Queue.NeedsEnrollment() {
+				return waitNeedsEnrollment
+			}
+			if a.Queue.Size() <= limit {
+				return drained
+			}
+			if ctx.Err() != nil {
+				return waitCanceled
+			}
+			d := max(a.Queue.State().NextAttemptAt.Sub(o.Now()), minRetry)
+			if waited+d > o.WaitBudget {
+				return waitBudgetSpent
+			}
+			agent.Logf(o.DataDir, "backfill waiting %ds for the ingest backoff", int(d/time.Second))
+			if o.Sleep(ctx, d) != nil {
+				return waitCanceled
+			}
+			waited += d
+			flush()
+		}
 	}
-	status := BackfillStatus{StartedAt: o.Now().UTC()}
+
+	prev, _ := ReadBackfillStatus(o.DataDir)
+	// A resume point is left by a paused run, or by one that was killed
+	// after queuing some transcripts; a finished run clears it.
+	resume := prev.Resume
+	if o.Restart {
+		resume = nil
+	}
+	status := BackfillStatus{StartedAt: o.Now().UTC(), Resume: resume}
+	store := cursor.Open(o.DataDir)
+	if resume == nil {
+		if err := withCursorLock(store, store.Reset); err != nil {
+			return err
+		}
+	} else {
+		// Cursors are left alone: the transcripts already queued keep the
+		// cursors the paused run recorded, and the ones after the resume
+		// point have had none since the paused run reset them, unless a
+		// hook has read them since, which also moved them past the resume
+		// point.
+		status.Sessions, status.Events = prev.Sessions, prev.Events
+		fmt.Fprintln(o.Out, "Resuming the paused backfill.")
+	}
 	writeBackfillStatus(o.DataDir, status)
 
 	transcripts := mainTranscripts(filepath.Join(o.ConfigDir, "projects"))
-	var sessions, events int
-	// Cursors were just reset, so transcripts are read from the start; the
-	// moves are recorded once per flushed batch rather than per session.
+	if resume != nil {
+		transcripts = after(transcripts, *resume)
+	}
+	sessions, events := status.Sessions, status.Events
+	// Cursors were reset, or the transcripts left have none, so transcripts
+	// are read from the start; the moves are recorded once per flushed
+	// batch rather than per session.
 	pending := map[string]cursor.Cursor{}
 	commit := func() {
 		if len(pending) == 0 {
@@ -132,19 +229,43 @@ func Backfill(ctx context.Context, o BackfillOptions) error {
 		}
 		pending = map[string]cursor.Cursor{}
 	}
+	// done is the resume point after the transcripts queued so far.
+	done := resume
 	finish := func(paused bool) {
 		commit()
 		status.Sessions, status.Events, status.Paused, status.FinishedAt = sessions, events, paused, o.Now().UTC()
+		status.Resume = nil
+		if paused {
+			status.Resume = done
+		}
 		writeBackfillStatus(o.DataDir, status)
 	}
-	for _, path := range transcripts {
-		if ctx.Err() != nil {
-			break
+	pause := func(result waitResult) error {
+		finish(true)
+		switch result {
+		case waitNeedsEnrollment:
+			return ErrCannotSend
+		case waitCanceled:
+			return ctx.Err()
 		}
-		n, moves, err := backfillOne(a, path, dev.DeviceID, o)
+		fmt.Fprintf(o.Out, "Backfilled %d sessions (%d events), then paused after waiting %s in total for Neo.Tax to accept events. Run neo-tax:backfill again later to continue where this one stopped.\n", sessions, events, waited)
+		return nil
+	}
+	// A queue already over its limit, such as the one a paused run left,
+	// drains before more is read.
+	if a.Queue.Size() > o.QueueLimit {
+		flush()
+		if r := waitBelow(o.QueueLimit); r != drained {
+			return pause(r)
+		}
+	}
+	for _, t := range transcripts {
+		if ctx.Err() != nil {
+			return pause(waitCanceled)
+		}
+		n, moves, err := backfillOne(a, t.path, dev.DeviceID, o)
 		if err != nil {
 			agent.Logf(o.DataDir, "backfill transcript failed: %s", errClass(err))
-			continue
 		}
 		for p, c := range moves {
 			pending[p] = c
@@ -153,6 +274,10 @@ func Backfill(ctx context.Context, o BackfillOptions) error {
 			sessions++
 			events += n
 		}
+		if done == nil || !t.mod.Equal(done.Boundary) {
+			done = &ResumePoint{Boundary: t.mod}
+		}
+		done.AtBoundary++
 		// Flush about a batch at a time: once a batch has been queued since
 		// the last flush, whether or not that flush drained the queue.
 		size := a.Queue.Size()
@@ -162,36 +287,79 @@ func Backfill(ctx context.Context, o BackfillOptions) error {
 		}
 		flush()
 		commit()
-		if a.Queue.NeedsEnrollment() {
-			finish(true)
-			return ErrCannotSend
-		}
-		if a.Queue.Size() > o.QueueLimit {
-			finish(true)
-			fmt.Fprintf(o.Out, "Backfilled %d sessions (%d events), then paused: Neo.Tax is not accepting events right now. Run neo-tax:backfill again later.\n", sessions, events)
-			return nil
+		// Record progress, so a run killed from here on resumes rather
+		// than starts over.
+		status.Sessions, status.Events, status.Resume = sessions, events, done
+		writeBackfillStatus(o.DataDir, status)
+		// Reading on while the queue is over its limit would only push it
+		// to the cap, so wait out the backoff first.
+		if r := waitBelow(o.QueueLimit); r != drained {
+			return pause(r)
 		}
 	}
 	flush()
-	if a.Queue.NeedsEnrollment() {
-		finish(true)
-		return ErrCannotSend
+	switch r := waitBelow(0); r {
+	case drained:
+		finish(false)
+		fmt.Fprintf(o.Out, "Backfilled %d sessions (%d events).\n", sessions, events)
+	case waitBudgetSpent:
+		// Every transcript is queued; hooks send the rest.
+		finish(false)
+		fmt.Fprintf(o.Out, "Backfilled %d sessions (%d events). Neo.Tax is not accepting events right now, so some are still queued; they are sent as you keep using Claude Code.\n", sessions, events)
+	default:
+		return pause(r)
 	}
-	finish(false)
-	fmt.Fprintf(o.Out, "Backfilled %d sessions (%d events).\n", sessions, events)
 	return nil
+}
+
+// after returns the transcripts a paused backfill had not yet queued:
+// those modified before the resume point's boundary, and those modified at
+// it beyond the first AtBoundary. Transcripts modified after the boundary
+// were queued by the paused run, or have been written since it reset their
+// cursors, in which case the hook that wrote them read them from the start.
+func after(ts []transcript, r ResumePoint) []transcript {
+	var out []transcript
+	at := 0
+	for _, t := range ts {
+		switch {
+		case t.mod.After(r.Boundary):
+			continue
+		case t.mod.Equal(r.Boundary):
+			at++
+			if at <= r.AtBoundary {
+				continue
+			}
+		}
+		out = append(out, t)
+	}
+	return out
 }
 
 // flushEvery is roughly one ingest batch of queued events.
 const flushEvery = 256 << 10
 
 // BackfillStatus is the last backfill's progress, kept in backfill.json.
+// Sessions and Events count from the start of the full run a resumed run
+// continues.
 type BackfillStatus struct {
 	StartedAt  time.Time `json:"started_at"`
 	FinishedAt time.Time `json:"finished_at,omitempty"`
 	Sessions   int       `json:"sessions"`
 	Events     int       `json:"events"`
 	Paused     bool      `json:"paused,omitempty"`
+	// Resume is where the next backfill continues this one: set while a
+	// run is in progress and when it pauses, nil once it finishes or when
+	// it had queued nothing, so the next run starts over.
+	Resume *ResumePoint `json:"resume,omitempty"`
+}
+
+// ResumePoint marks how far a paused backfill got through the transcripts,
+// newest first, without naming any of them: every transcript modified after
+// Boundary was queued, and so were the first AtBoundary of those modified
+// at it, in path order.
+type ResumePoint struct {
+	Boundary   time.Time `json:"boundary"`
+	AtBoundary int       `json:"at_boundary"`
 }
 
 func writeBackfillStatus(dataDir string, s BackfillStatus) {
@@ -245,7 +413,7 @@ func withCursorLock(store *cursor.Store, fn func() error) error {
 }
 
 // mainTranscripts lists every session's main transcript under projects/,
-// newest first by modification time.
+// newest first by modification time, then by path.
 //
 // Older Claude Code builds wrote subagent transcripts beside the main ones
 // as agent-<id>.jsonl; newer builds put them under <session>/subagents/,
@@ -256,22 +424,34 @@ func withCursorLock(store *cursor.Store, fn func() error) error {
 // turns.
 //
 // @spec: session-event-wire-contract#subagent-turns-belong-to-parent
-func mainTranscripts(projectsDir string) []string {
+func mainTranscripts(projectsDir string) []transcript {
 	all, _ := filepath.Glob(filepath.Join(projectsDir, "*", "*.jsonl"))
-	var paths []string
+	var ts []transcript
 	for _, p := range all {
-		if !strings.HasPrefix(filepath.Base(p), "agent-") {
-			paths = append(paths, p)
+		if strings.HasPrefix(filepath.Base(p), "agent-") {
+			continue
 		}
-	}
-	mod := map[string]time.Time{}
-	for _, p := range paths {
+		t := transcript{path: p}
 		if fi, err := os.Stat(p); err == nil {
-			mod[p] = fi.ModTime()
+			t.mod = fi.ModTime().UTC()
 		}
+		ts = append(ts, t)
 	}
-	sort.SliceStable(paths, func(i, j int) bool { return mod[paths[i]].After(mod[paths[j]]) })
-	return paths
+	// Ties are broken by path so that a resume point's count of transcripts
+	// at its boundary names the same ones on the next run.
+	sort.SliceStable(ts, func(i, j int) bool {
+		if !ts[i].mod.Equal(ts[j].mod) {
+			return ts[i].mod.After(ts[j].mod)
+		}
+		return ts[i].path < ts[j].path
+	})
+	return ts
+}
+
+// transcript is a main transcript and its modification time.
+type transcript struct {
+	path string
+	mod  time.Time
 }
 
 // sessionStart is what a backfill knows about how a past session began. Cwd

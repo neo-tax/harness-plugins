@@ -13,7 +13,8 @@ import (
 // @spec: device-enrollment#interactive-enrollment
 func TestLoginCommand(t *testing.T) {
 	var started string
-	startBackfill = func(d string) error { started = d; return nil }
+	var restarted bool
+	startBackfill = func(d string, restart bool) error { started, restarted = d, restart; return nil }
 	srv := httptest.NewServer(fakeingest.New(fakeingest.Options{}))
 	defer srv.Close()
 	dir := t.TempDir()
@@ -31,8 +32,12 @@ func TestLoginCommand(t *testing.T) {
 	if _, err := enroll.Load(dir); err != nil {
 		t.Fatal(err)
 	}
-	if started != dir {
-		t.Fatalf("backfill started for %q", started)
+	if started != dir || restarted {
+		t.Fatalf("backfill started for %q (restart %v)", started, restarted)
+	}
+	// @spec: event-queue-and-backfill#backfill-command
+	if code := run([]string{"backfill", "--data-dir", dir, "--background", "--restart"}, nil, &out, &errOut); code != 0 || !restarted {
+		t.Fatalf("backfill --restart: exit %d, restart %v: %s", code, restarted, errOut.String())
 	}
 }
 

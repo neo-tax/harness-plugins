@@ -33,7 +33,8 @@ const usage = `usage: neo-tax-agent <command> [flags]
 commands:
   hook <name>  handle a harness hook; the payload is read from standard input
   login        enroll this device with an enrollment token, then start a backfill
-  backfill     reset every cursor and resend events for every transcript on disk
+  backfill     resend events for every transcript on disk, continuing a paused
+               backfill where it stopped (--restart starts over from the newest)
   version    print the agent version
 `
 
@@ -147,7 +148,7 @@ func login(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	// @spec: event-queue-and-backfill#backfill-after-login
 	// @spec: device-enrollment#backfill-after-interactive-login
-	if err := startBackfill(d); err != nil {
+	if err := startBackfill(d, false); err != nil {
 		fmt.Fprintln(stderr, "neo-tax-agent: could not start the backfill; run neo-tax:backfill:", err)
 		return 0
 	}
@@ -157,12 +158,16 @@ func login(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 // startBackfill runs "neo-tax-agent backfill" detached from this process,
 // so login returns while the backfill runs under its own command.
-var startBackfill = func(dataDir string) error {
+var startBackfill = func(dataDir string, restart bool) error {
 	self, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(self, "backfill", "--data-dir", dataDir)
+	args := []string{"backfill", "--data-dir", dataDir}
+	if restart {
+		args = append(args, "--restart")
+	}
+	cmd := exec.Command(self, args...)
 	detach(cmd)
 	if err := cmd.Start(); err != nil {
 		return err
@@ -175,6 +180,7 @@ func backfill(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	dir := fs.String("data-dir", "", "plugin data directory (default $CLAUDE_PLUGIN_DATA)")
 	background := fs.Bool("background", false, "start the backfill detached and return")
+	restart := fs.Bool("restart", false, "ignore a paused backfill and start over from the newest transcript")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -192,14 +198,14 @@ func backfill(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "neo-tax-agent:", err)
 			return 1
 		}
-		if err := startBackfill(d); err != nil {
+		if err := startBackfill(d, *restart); err != nil {
 			fmt.Fprintln(stderr, "neo-tax-agent: could not start the backfill:", err)
 			return 1
 		}
 		fmt.Fprintln(stdout, "Started resending your Claude Code sessions in the background.")
 		return 0
 	}
-	err := claudecode.Backfill(context.Background(), claudecode.BackfillOptions{DataDir: d, AgentVersion: Version, Out: stdout})
+	err := claudecode.Backfill(context.Background(), claudecode.BackfillOptions{DataDir: d, AgentVersion: Version, Out: stdout, Restart: *restart})
 	if errors.Is(err, claudecode.ErrBackfillRunning) {
 		fmt.Fprintln(stdout, "A backfill is already running.")
 		return 0

@@ -3,7 +3,9 @@ package claudecode_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -149,21 +151,265 @@ func TestBackfillRequiresAnEnrolledDevice(t *testing.T) {
 	}
 }
 
-// A backfill that cannot drain stops before the queue nears its cap.
-func TestBackfillStopsWhenQueueBacksUp(t *testing.T) {
-	h := newHookEnv(t, true)
-	root := projects(t, h.repo)
-	http.Post(h.srv.URL+"/_fake/faults", "application/json", strings.NewReader(`{"mode":"server_error","count":100}`))
-	var out bytes.Buffer
-	err := claudecode.Backfill(context.Background(), claudecode.BackfillOptions{
-		DataDir: h.data, ConfigDir: root, AgentVersion: "v", Now: func() time.Time { return h.now },
-		HTTP: &http.Client{Timeout: 5 * time.Second}, Out: &out, QueueLimit: 1,
-	})
+// manySessions lays out n one-turn sessions under a projects directory,
+// session-000 newest, each a minute older than the last.
+func manySessions(t *testing.T, repo string, n int) string {
+	t.Helper()
+	root := t.TempDir()
+	proj := filepath.Join(root, "projects", "-many")
+	os.MkdirAll(proj, 0o700)
+	base := time.Now().Add(-time.Hour)
+	for i := range n {
+		id := fmt.Sprintf("session-%03d", i)
+		path := filepath.Join(proj, id+".jsonl")
+		os.WriteFile(path, []byte(`{"type":"user","timestamp":"2026-10-26T09:00:00Z","cwd":"`+repo+`","gitBranch":"b","entrypoint":"cli","version":"2.1.310","message":{"content":"hi"}}
+{"type":"assistant","timestamp":"2026-10-26T09:00:01Z","gitBranch":"b","version":"2.1.310","requestId":"req_`+id+`","message":{"id":"msg_`+id+`","model":"m","usage":{"input_tokens":1,"output_tokens":1}}}
+`), 0o600)
+		mod := base.Add(-time.Duration(i) * time.Minute)
+		os.Chtimes(path, mod, mod)
+	}
+	return root
+}
+
+// openedSessions counts the session.opened events recorded per session.
+func openedSessions(evs []map[string]any) map[string]int {
+	out := map[string]int{}
+	for _, e := range evs {
+		if e["event_kind"] == "session.opened" {
+			out[e["session_id"].(string)]++
+		}
+	}
+	return out
+}
+
+func fault(t *testing.T, h *hookEnv, mode string, count int) {
+	t.Helper()
+	resp, err := http.Post(h.srv.URL+"/_fake/faults", "application/json", strings.NewReader(fmt.Sprintf(`{"mode":%q,"count":%d}`, mode, count)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "paused") || !strings.Contains(out.String(), "1 sessions") {
-		t.Fatalf("output %q", out.String())
+	resp.Body.Close()
+}
+
+// backfillWaiting runs a backfill whose sleeps advance the hook env's clock
+// instead of waiting, and returns its output and how long it slept.
+func (h *hookEnv) backfillWaiting(configDir string, limit int64, budget time.Duration, restart bool) (string, time.Duration, error) {
+	var out bytes.Buffer
+	var slept time.Duration
+	err := claudecode.Backfill(context.Background(), claudecode.BackfillOptions{
+		DataDir: h.data, ConfigDir: configDir, AgentVersion: "v", Now: func() time.Time { return h.now },
+		HTTP: &http.Client{Timeout: 5 * time.Second}, Out: &out, QueueLimit: limit, WaitBudget: budget, Restart: restart,
+		Sleep: func(_ context.Context, d time.Duration) error { h.now = h.now.Add(d); slept += d; return nil },
+	})
+	return out.String(), slept, err
+}
+
+// One failed ingest request puts the queue into backoff. The backfill waits
+// it out and keeps going rather than stopping with most sessions unread.
+// @spec: event-queue-and-backfill#backfill-waits-out-backoff
+func TestBackfillWaitsOutBackoff(t *testing.T) {
+	h := newHookEnv(t, true)
+	const n = 150
+	root := manySessions(t, h.repo, n)
+	fault(t, h, "server_error", 1)
+	out, slept, err := h.backfillWaiting(root, 2000, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slept < 30*time.Second {
+		t.Errorf("slept %s, want at least the 30s backoff", slept)
+	}
+	opened := openedSessions(h.recorded())
+	if len(opened) != n {
+		t.Fatalf("sent %d of %d sessions; output %q", len(opened), n, out)
+	}
+	want := fmt.Sprintf("Backfilled %d sessions", n)
+	if !strings.Contains(out, want) || strings.Contains(out, "paused") {
+		t.Errorf("output %q", out)
+	}
+	if st, _ := claudecode.ReadBackfillStatus(h.data); st.Paused || st.Resume != nil || st.Sessions != n {
+		t.Errorf("status %+v", st)
+	}
+}
+
+// A backfill that cannot drain within its wait budget pauses with the queue
+// under its limit and records where to resume.
+// @spec: event-queue-and-backfill#backfill-waits-out-backoff
+func TestBackfillPausesWhenWaitBudgetIsSpent(t *testing.T) {
+	h := newHookEnv(t, true)
+	root := manySessions(t, h.repo, 20)
+	fault(t, h, "server_error", 1000)
+	out, slept, err := h.backfillWaiting(root, 1, time.Minute, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 30s, then the doubled 60s would pass the one-minute budget.
+	if slept != 30*time.Second {
+		t.Errorf("slept %s", slept)
+	}
+	if !strings.Contains(out, "paused") || !strings.Contains(out, "1 sessions") || !strings.Contains(out, "again later") {
+		t.Fatalf("output %q", out)
+	}
+	st, _ := claudecode.ReadBackfillStatus(h.data)
+	if !st.Paused || st.FinishedAt.IsZero() || st.Sessions != 1 || st.Resume == nil || st.Resume.AtBoundary != 1 {
+		t.Fatalf("status %+v", st)
+	}
+}
+
+// A backfill run after a paused one continues after the transcripts the
+// paused run queued: it neither re-reads them nor resets their cursors,
+// and reads every one after the resume point from the start.
+// @spec: event-queue-and-backfill#backfill-resumes-after-pause
+func TestBackfillResumesAfterPause(t *testing.T) {
+	h := newHookEnv(t, true)
+	const n = 40
+	root := manySessions(t, h.repo, n)
+	proj := filepath.Join(root, "projects", "-many")
+	fault(t, h, "server_error", 1000)
+	h.backfillWaiting(root, 1500, time.Minute, false)
+	st, _ := claudecode.ReadBackfillStatus(h.data)
+	if !st.Paused || st.Resume == nil || st.Sessions == 0 || st.Sessions >= n {
+		t.Fatalf("setup: status %+v", st)
+	}
+	queued := st.Sessions
+	// Rewrite the newest session, which the paused run queued, keeping its
+	// modification time: a resumed run that re-read it would send msg_X.
+	newest := filepath.Join(proj, "session-000.jsonl")
+	fi, _ := os.Stat(newest)
+	os.WriteFile(newest, []byte(`{"type":"user","timestamp":"2026-10-26T09:00:00Z","cwd":"`+h.repo+`","version":"2.1.310","message":{"content":"x"}}
+{"type":"assistant","timestamp":"2026-10-26T09:00:01Z","version":"2.1.310","requestId":"req_X","message":{"id":"msg_X","model":"m","usage":{"input_tokens":1,"output_tokens":1}}}
+`), 0o600)
+	os.Chtimes(newest, fi.ModTime(), fi.ModTime())
+	cursorBefore := cursor.Open(h.data).Get(filepath.Join(proj, "session-001.jsonl"))
+	if cursorBefore.Offset == 0 {
+		t.Fatal("setup: paused run recorded no cursor for a queued transcript")
+	}
+
+	fault(t, h, "", 0)
+	h.now = h.now.Add(2 * time.Hour) // past the backoff
+	out, _, err := h.backfillWaiting(root, 1500, time.Minute, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Resuming") || !strings.Contains(out, fmt.Sprintf("Backfilled %d sessions", n)) {
+		t.Errorf("output %q", out)
+	}
+	got := h.recorded()
+	opened := openedSessions(got)
+	if len(opened) != n {
+		t.Fatalf("sent %d of %d sessions after resuming (%d queued before the pause)", len(opened), n, queued)
+	}
+	for _, e := range got {
+		if e["message_id"] == "msg_X" {
+			t.Fatal("resumed run re-read a transcript the paused run queued")
+		}
+	}
+	if c := cursor.Open(h.data).Get(filepath.Join(proj, "session-001.jsonl")); c != cursorBefore {
+		t.Errorf("queued transcript's cursor changed: %+v -> %+v", cursorBefore, c)
+	}
+	if c := cursor.Open(h.data).Get(filepath.Join(proj, fmt.Sprintf("session-%03d.jsonl", n-1))); c.Offset == 0 {
+		t.Error("oldest transcript's cursor not advanced by the resumed run")
+	}
+	if st, _ := claudecode.ReadBackfillStatus(h.data); st.Paused || st.Resume != nil || st.Sessions != n {
+		t.Errorf("status %+v", st)
+	}
+}
+
+// A backfill killed partway leaves the resume point its last batch
+// recorded, and the next run continues from there.
+// @spec: event-queue-and-backfill#backfill-resumes-after-pause
+func TestBackfillResumesAfterBeingKilled(t *testing.T) {
+	h := newHookEnv(t, true)
+	const n = 20
+	root := manySessions(t, h.repo, n)
+	fault(t, h, "server_error", 1000)
+	h.backfillWaiting(root, 1500, time.Minute, false)
+	st, _ := claudecode.ReadBackfillStatus(h.data)
+	if st.Resume == nil {
+		t.Fatalf("setup: status %+v", st)
+	}
+	// What a run killed after that batch leaves: in progress, not paused.
+	st.Paused, st.FinishedAt = false, time.Time{}
+	b, _ := json.Marshal(st)
+	os.WriteFile(filepath.Join(h.data, "backfill.json"), b, 0o600)
+	newest := filepath.Join(root, "projects", "-many", "session-000.jsonl")
+	fi, _ := os.Stat(newest)
+	os.WriteFile(newest, []byte(`{"type":"user","timestamp":"2026-10-26T09:00:00Z","cwd":"`+h.repo+`","version":"2.1.310","message":{"content":"x"}}
+{"type":"assistant","timestamp":"2026-10-26T09:00:01Z","version":"2.1.310","requestId":"req_X","message":{"id":"msg_X","model":"m","usage":{"input_tokens":1,"output_tokens":1}}}
+`), 0o600)
+	os.Chtimes(newest, fi.ModTime(), fi.ModTime())
+	fault(t, h, "", 0)
+	h.now = h.now.Add(2 * time.Hour)
+	if _, _, err := h.backfillWaiting(root, 1500, time.Minute, false); err != nil {
+		t.Fatal(err)
+	}
+	got := h.recorded()
+	for _, e := range got {
+		if e["message_id"] == "msg_X" {
+			t.Fatal("resumed run re-read a queued transcript")
+		}
+	}
+	if len(openedSessions(got)) != n {
+		t.Fatalf("sent %d of %d", len(openedSessions(got)), n)
+	}
+}
+
+// Restart ignores a paused backfill's resume point and reads every
+// transcript again from the newest.
+// @spec: event-queue-and-backfill#backfill-resumes-after-pause
+// @spec: event-queue-and-backfill#backfill-command
+func TestBackfillRestartIgnoresResumePoint(t *testing.T) {
+	h := newHookEnv(t, true)
+	const n = 10
+	root := manySessions(t, h.repo, n)
+	fault(t, h, "server_error", 1000)
+	h.backfillWaiting(root, 1, time.Minute, false)
+	if st, _ := claudecode.ReadBackfillStatus(h.data); st.Resume == nil {
+		t.Fatalf("setup: status %+v", st)
+	}
+	fault(t, h, "", 0)
+	h.now = h.now.Add(2 * time.Hour)
+	out, _, err := h.backfillWaiting(root, 1, time.Minute, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "Resuming") || !strings.Contains(out, fmt.Sprintf("Backfilled %d sessions", n)) {
+		t.Errorf("output %q", out)
+	}
+	if got := len(openedSessions(h.recorded())); got != n {
+		t.Fatalf("sent %d of %d", got, n)
+	}
+}
+
+// Transcripts sharing a modification time resume by their count in path
+// order, so none is skipped or read twice.
+// @spec: event-queue-and-backfill#backfill-resumes-after-pause
+func TestBackfillResumesWithinTiedModificationTimes(t *testing.T) {
+	h := newHookEnv(t, true)
+	const n = 12
+	root := manySessions(t, h.repo, n)
+	same := time.Now().Add(-time.Hour)
+	paths, _ := filepath.Glob(filepath.Join(root, "projects", "-many", "*.jsonl"))
+	for _, p := range paths {
+		os.Chtimes(p, same, same)
+	}
+	fault(t, h, "server_error", 1000)
+	h.backfillWaiting(root, 1500, time.Minute, false)
+	st, _ := claudecode.ReadBackfillStatus(h.data)
+	if st.Resume == nil || st.Resume.AtBoundary == 0 || st.Resume.AtBoundary >= n {
+		t.Fatalf("setup: status %+v", st)
+	}
+	fault(t, h, "", 0)
+	h.now = h.now.Add(2 * time.Hour)
+	if _, _, err := h.backfillWaiting(root, 1500, time.Minute, false); err != nil {
+		t.Fatal(err)
+	}
+	opened := openedSessions(h.recorded())
+	if len(opened) != n {
+		t.Fatalf("sent %d of %d", len(opened), n)
+	}
+	if st, _ := claudecode.ReadBackfillStatus(h.data); st.Sessions != n {
+		t.Errorf("counted %d sessions, want %d", st.Sessions, n)
 	}
 }
 
