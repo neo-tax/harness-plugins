@@ -1,14 +1,25 @@
 #!/bin/sh
-# Install smoke test. Installs the neo-tax plugin from this repository into a
-# throwaway Claude Code configuration directory, enrolls it against the fake
-# ingest server, runs one non-interactive prompt, and asserts that one
-# session.opened, at least one session.turn, and one session.closed arrived.
-# It is the only test that goes through Claude Code's own hook dispatch.
+# Install smoke test. Installs the neo-tax plugin into a throwaway Claude Code
+# configuration directory, enrolls it against the fake ingest server, runs one
+# non-interactive prompt, and asserts that one session.opened, at least one
+# session.turn, and one session.closed arrived. It is the only test that goes
+# through Claude Code's own hook dispatch.
 #
-# Needs go, git, jq, claude, and ANTHROPIC_API_KEY. SMOKE_SKIP_PROMPT=1 stops
-# after install and enrollment (no API call).
+# Two modes:
+#   default              the plugin comes from this working tree and the hooks
+#                        run an agent built from it (pull requests).
+#   SMOKE_RELEASE_TAG=vX.Y.Z
+#                        the plugin comes from GitHub at that tag through the
+#                        marketplace's own git-subdir source, and the launcher
+#                        downloads and verifies the binary attached to the
+#                        release, the way a fleet install does (release
+#                        workflow, after publish).
+#
+# Needs go, git, jq, curl, claude, and ANTHROPIC_API_KEY. SMOKE_SKIP_PROMPT=1
+# stops after install and enrollment (no API call).
 #
 # @spec: test-and-release#install-smoke-test
+# @spec: test-and-release#fleet-install-before-pin
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -19,40 +30,67 @@ cleanup() {
   rm -rf "$tmp"
 }
 trap cleanup EXIT
+fail() {
+  echo "smoke: $*" >&2
+  [ -s "$tmp/fake-ingest.log" ] && sed 's/^/fake-ingest: /' "$tmp/fake-ingest.log" >&2
+  exit 1
+}
+
+tag=${SMOKE_RELEASE_TAG:-}
 
 cd "$repo"
-go build -o "$tmp/neo-tax-agent" ./cmd/neo-tax-agent
 go build -o "$tmp/fake-ingest" ./cmd/fake-ingest
 
 port=${SMOKE_PORT:-18787}
-"$tmp/fake-ingest" -addr "127.0.0.1:$port" -record "$tmp/events.jsonl" 2>/dev/null &
+"$tmp/fake-ingest" -addr "127.0.0.1:$port" -record "$tmp/events.jsonl" 2>"$tmp/fake-ingest.log" &
 fake_pid=$!
+ready=""
 for _ in $(seq 1 50); do
-  curl -fs "http://127.0.0.1:$port/_fake/events" >/dev/null 2>&1 && break
+  curl -fs "http://127.0.0.1:$port/_fake/events" >/dev/null 2>&1 && { ready=1; break; }
   sleep 0.1
 done
+[ -n "$ready" ] || fail "fake ingest did not answer on port $port"
 
 export CLAUDE_CONFIG_DIR="$tmp/claude"
-export NEO_TAX_AGENT_BIN="$tmp/neo-tax-agent"
 mkdir -p "$CLAUDE_CONFIG_DIR"
+unset NEO_TAX_AGENT_BIN
 
-# A copy of the marketplace whose plugin source is this working tree rather
-# than the released tag.
 market="$tmp/marketplace"
 mkdir -p "$market/.claude-plugin"
-cp -R "$repo/plugins" "$market/"
-jq '.plugins[0].source = "./plugins/claude-code"' "$repo/.claude-plugin/marketplace.json" >"$market/.claude-plugin/marketplace.json"
+if [ -n "$tag" ]; then
+  # The marketplace as the pin will write it: the same git-subdir source on
+  # GitHub, at this tag.
+  jq --arg ref "$tag" --arg v "${tag#v}" \
+    '.metadata.version = $v | .plugins[0].source.ref = $ref | .plugins[0].version = $v' \
+    "$repo/.claude-plugin/marketplace.json" >"$market/.claude-plugin/marketplace.json"
+else
+  # The plugin source is this working tree, and the hooks run an agent built
+  # from it.
+  go build -o "$tmp/neo-tax-agent" ./cmd/neo-tax-agent
+  export NEO_TAX_AGENT_BIN="$tmp/neo-tax-agent"
+  cp -R "$repo/plugins" "$market/"
+  jq '.plugins[0].source = "./plugins/claude-code"' "$repo/.claude-plugin/marketplace.json" >"$market/.claude-plugin/marketplace.json"
+fi
 
 claude plugin marketplace add "$market"
 claude plugin install neo-tax@neo-tax
 
-# Enroll the way the login skill does: through the plugin's launcher with no
-# data directory given, so the launcher's fallback must match the directory
-# Claude Code hands the hooks.
-"$market/plugins/claude-code/bin/neo-tax-agent" login \
-  --server "http://127.0.0.1:$port" --token smoke --email smoke@example.com
+# Enroll the way the login skill does: through the installed plugin's launcher
+# with no data directory given, so the launcher's fallback must match the
+# directory Claude Code hands the hooks.
+launcher=$(find "$CLAUDE_CONFIG_DIR/plugins" -path '*/bin/neo-tax-agent' -type f 2>/dev/null | head -n 1)
+if [ -z "$launcher" ] && [ -z "$tag" ]; then
+  launcher="$market/plugins/claude-code/bin/neo-tax-agent"
+fi
+[ -n "$launcher" ] || fail "the installed plugin has no bin/neo-tax-agent"
+"$launcher" login --server "http://127.0.0.1:$port" --token smoke --email smoke@example.com
 data="$CLAUDE_CONFIG_DIR/plugins/data/neo-tax-neo-tax"
-test -f "$data/device.json" || { echo "smoke: no device.json in $data" >&2; exit 1; }
+if [ -n "$tag" ]; then
+  # The launcher exits 0 when a download fails, so a missing binary would
+  # otherwise only show up as a missing device.json.
+  test -x "$data/bin/neo-tax-agent-$tag" || fail "the launcher did not download and verify the $tag binary"
+fi
+test -f "$data/device.json" || fail "no device.json in $data"
 
 # Let login's background backfill (of an empty history) finish first.
 for _ in $(seq 1 100); do
@@ -79,4 +117,4 @@ for _ in $(seq 1 120); do
 done
 opened=$(count session.opened); turns=$(count session.turn); closed=$(count session.closed)
 echo "smoke: opened=$opened turn=$turns closed=$closed"
-[ "$opened" -eq 1 ] && [ "$turns" -ge 1 ] && [ "$closed" -eq 1 ]
+[ "$opened" -eq 1 ] && [ "$turns" -ge 1 ] && [ "$closed" -eq 1 ] || fail "expected one opened, at least one turn, and one closed"

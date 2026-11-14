@@ -1,0 +1,8 @@
+# Workflows pin actions to commit SHAs; this proposes the updates.
+# @spec: test-and-release#actions-pinned-by-sha
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
