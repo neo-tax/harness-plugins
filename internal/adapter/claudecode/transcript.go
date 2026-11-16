@@ -321,4 +321,4 @@ func tailWith(ctx Context, mainPath string, cursors map[string]cursor.Cursor) (R
 // code branch.
 //
 // @spec: test-and-release#fixture-per-harness-version
-var SupportedVersions = []string{"2.1.310"}
+var SupportedVersions = []string{"2.1.310", "2.1.311"}

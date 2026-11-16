@@ -5,7 +5,7 @@ owner:
   - Firas Abuzaid
 created: 2026-10-24
 updated: 2026-11-13
-version: 4
+version: 5
 affects:
   - internal/allowlist/*.go
   - contract/types.go
@@ -34,6 +34,7 @@ Governs the single list of fields the agent is permitted to emit, how it is enfo
 - `title-excluded`(tested): A harness-generated session title or slug is not on the allowlist for any event kind.
 - `content-excluded`(tested): Prompt text, completion text, tool inputs, tool outputs, and file paths are not on the allowlist for any event kind.
 - `request-id-included`(tested): The vendor's API request id is on the allowlist for `session.turn`.
+- `side-usage-included`(tested): Per-model token counts of the API calls that produced no turn are on the allowlist for `session.closed` as `side_usage`, carrying the model name and counts only.
 - `git-user-email-included`(tested): The git `user.email` in effect for the session's repository (its own config, else the engineer's global git config) is on the allowlist for `session.opened` only.
 - `content-bearing-payloads-reduced`(tested): A hook payload that carries model output is reduced to its usage counts inside the agent before any of it is written to disk.
 - `privacy-statement-generated`(tested): The published privacy statement's field table is generated from the allowlist in code, and CI fails when the committed statement differs from the generated one.

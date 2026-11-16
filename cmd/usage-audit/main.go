@@ -126,12 +126,16 @@ func printReport(w io.Writer, r usageaudit.Report) {
 	}
 	row("API (all billable)", r.API)
 	row("events (matched)", r.Events)
+	row("side usage (closes)", r.Side)
 	if t := r.API.Total(); t > 0 {
 		var missing int64
 		for _, u := range r.MissingByModel {
 			missing += u.Total()
 		}
 		fmt.Fprintf(w, "Tokens in requests with no turn: %d (%.2f%% of API total)\n", missing, 100*float64(missing)/float64(t))
+	}
+	if t := r.API.Total(); t > 0 {
+		fmt.Fprintf(w, "Tokens neither turns nor side usage report: %d (%.2f%% of API total)\n", r.Unaccounted(), 100*float64(r.Unaccounted())/float64(t))
 	}
 	if len(r.MissingByModel) > 0 {
 		fmt.Fprintln(w, "Missing, by model:")

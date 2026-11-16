@@ -31,6 +31,13 @@ Prompt text, completion text, tool inputs, tool outputs, file paths, the working
 | `ended_at` | When the session ended. |
 | `reason` | Why the harness ended the session, for example logout or exit. |
 | `dropped_events` | How many events the agent discarded because its local queue was full. |
+| `side_usage` | Token counts, one entry per model, of the session's model calls that produced no turn of their own (the session title, the recap after time away, compaction's summary); null when the harness recorded no session totals. |
+| `side_usage[].model` | Model name the calls ran on. |
+| `side_usage[].input` | Uncached input tokens. |
+| `side_usage[].output` | Output tokens. |
+| `side_usage[].cache_write_5m` | Input tokens written to the five-minute prompt cache. |
+| `side_usage[].cache_write_1h` | Input tokens written to the one-hour prompt cache. |
+| `side_usage[].cache_read` | Input tokens read from the prompt cache. |
 
 ### `session.opened`
 

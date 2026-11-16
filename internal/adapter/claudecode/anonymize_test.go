@@ -34,6 +34,26 @@ func TestAnonymizerStripsContentKeepsStructure(t *testing.T) {
 	}
 }
 
+// A cost-state line keeps the start time and the per-model numbers that
+// session totals come from, and nothing else.
+// @spec: test-and-release#fixtures-from-real-transcripts
+func TestAnonymizerKeepsCostStateNumbers(t *testing.T) {
+	src := `{"type":"cost-state","sessionId":"s","startTime":1792970060880,"totalCostUSD":0.9,"lastPrompt":"fix Acme","modelUsage":{"claude-opus-5-5":{"inputTokens":4094,"cacheCreationEphemeral1hInputTokens":78009,"note":"Acme"},"/Users/someone/acme":{"inputTokens":1}}}` + "\n"
+	var out bytes.Buffer
+	if err := claudecode.NewAnonymizer().Anonymize(strings.NewReader(src), &out); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	json.Unmarshal(out.Bytes(), &got)
+	want := map[string]any{
+		"type": "cost-state", "sessionId": "s", "startTime": 1792970060880.0, "totalCostUSD": "[redacted]", "lastPrompt": "[redacted]",
+		"modelUsage": map[string]any{"claude-opus-5-5": map[string]any{"inputTokens": 4094.0, "cacheCreationEphemeral1hInputTokens": 78009.0}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got  %v\nwant %v", got, want)
+	}
+}
+
 // The anonymized transcript parses to the same event stream as the original,
 // except that repository names are placeholders.
 func TestAnonymizedTranscriptParsesTheSame(t *testing.T) {

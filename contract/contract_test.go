@@ -81,7 +81,15 @@ func validClosed() map[string]any {
 		"ended_at":       "2026-10-25T16:00:00Z",
 		"reason":         "prompt_input_exit",
 		"dropped_events": 0,
+		"side_usage":     []any{sideEntry()},
 	})
+}
+
+func sideEntry() map[string]any {
+	return map[string]any{
+		"model": "claude-opus-5-5", "input": 4076, "output": 2956,
+		"cache_write_5m": 0, "cache_write_1h": 935, "cache_read": 151837,
+	}
 }
 
 func marshal(t *testing.T, v any) []byte {
@@ -121,12 +129,31 @@ func TestEventRejections(t *testing.T) {
 		// @spec: session-event-wire-contract#repo-shape
 		"uppercase repo owner": with(validOpened(), map[string]any{"repo": with(repo(), map[string]any{"owner": "Neo-Tax"})}),
 		"repo missing name":    with(validPROpened(), map[string]any{"repo": without(repo(), "name")}),
+		// @spec: session-event-wire-contract#closed-fields
+		"closed missing side_usage": without(validClosed(), "side_usage"),
+		// @spec: session-event-wire-contract#side-usage-shape
+		"side_usage as object":      with(validClosed(), map[string]any{"side_usage": sideEntry()}),
+		"side entry missing model":  with(validClosed(), map[string]any{"side_usage": []any{without(sideEntry(), "model")}}),
+		"side entry empty model":    with(validClosed(), map[string]any{"side_usage": []any{with(sideEntry(), map[string]any{"model": ""})}}),
+		"side entry null count":     with(validClosed(), map[string]any{"side_usage": []any{with(sideEntry(), map[string]any{"output": nil})}}),
+		"side entry negative count": with(validClosed(), map[string]any{"side_usage": []any{with(sideEntry(), map[string]any{"cache_read": -1})}}),
+		"side entry extra field":    with(validClosed(), map[string]any{"side_usage": []any{with(sideEntry(), map[string]any{"cost_usd": 0.4})}}),
+		"side entry service tier":   with(validClosed(), map[string]any{"side_usage": []any{with(sideEntry(), map[string]any{"service_tier": "standard"})}}),
 		// @spec: session-event-wire-contract#subagent-turns-belong-to-parent
 		"empty subagent id": with(validTurn(), map[string]any{"subagent_id": ""}),
 	}
 	for name, ev := range cases {
 		if err := contract.ValidateEvent(marshal(t, ev)); err == nil {
 			t.Errorf("%s: expected rejection", name)
+		}
+	}
+}
+
+// @spec: session-event-wire-contract#side-usage-shape
+func TestSideUsageNullOrEmpty(t *testing.T) {
+	for _, v := range []any{nil, []any{}} {
+		if err := contract.ValidateEvent(marshal(t, with(validClosed(), map[string]any{"side_usage": v}))); err != nil {
+			t.Errorf("side_usage %v: %v", v, err)
 		}
 	}
 }

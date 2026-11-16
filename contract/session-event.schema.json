@@ -114,13 +114,33 @@
     },
     "closed": {
       "type": "object",
-      "required": ["event_kind", "ended_at", "reason", "dropped_events"],
+      "required": ["event_kind", "ended_at", "reason", "dropped_events", "side_usage"],
       "properties": {
         "event_kind": { "const": "session.closed" },
         "ended_at": { "$ref": "#/$defs/timestamp" },
         "reason": { "$ref": "#/$defs/nullable_string" },
-        "dropped_events": { "type": "integer", "minimum": 0 }
+        "dropped_events": { "type": "integer", "minimum": 0 },
+        "side_usage": {
+          "description": "Usage of the session's API calls that produced no turn, per model and cumulative for the session; null when the harness recorded no session totals.",
+          "oneOf": [
+            { "type": "null" },
+            { "type": "array", "items": { "$ref": "#/$defs/side_usage_entry" } }
+          ]
+        }
       }
+    },
+    "side_usage_entry": {
+      "type": "object",
+      "required": ["model", "input", "output", "cache_write_5m", "cache_write_1h", "cache_read"],
+      "properties": {
+        "model": { "type": "string", "minLength": 1 },
+        "input": { "type": "integer", "minimum": 0 },
+        "output": { "type": "integer", "minimum": 0 },
+        "cache_write_5m": { "type": "integer", "minimum": 0 },
+        "cache_write_1h": { "type": "integer", "minimum": 0 },
+        "cache_read": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
     }
   }
 }

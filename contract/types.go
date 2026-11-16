@@ -93,6 +93,20 @@ type ClosedFields struct {
 	EndedAt       time.Time `json:"ended_at"`
 	Reason        *string   `json:"reason"`
 	DroppedEvents int64     `json:"dropped_events"`
+	// SideUsage is nil (null) when the harness recorded no session totals,
+	// and empty when it did and every call produced a turn.
+	SideUsage []SideUsage `json:"side_usage"`
+}
+
+// SideUsage is one model's usage across the session's API calls that
+// produced no turn.
+type SideUsage struct {
+	Model        string `json:"model"`
+	Input        int64  `json:"input"`
+	Output       int64  `json:"output"`
+	CacheWrite5m int64  `json:"cache_write_5m"`
+	CacheWrite1h int64  `json:"cache_write_1h"`
+	CacheRead    int64  `json:"cache_read"`
 }
 
 type Opened struct {
@@ -224,45 +238,77 @@ func SchemaFields() map[string][]string {
 }
 
 // ObjectFields returns the sorted property names of the object the session
-// event schema permits at path on events of kind, following $ref and looking
-// through a nullable oneOf. path is a field name, or a dotted path such as
-// "usage.cache" for an object nested inside an object field. It returns nil
-// when the path does not name an object.
+// event schema permits at path on events of kind, or of each object in a
+// list-valued field, following $ref and looking through a nullable oneOf. path
+// is a field name, or a dotted path such as "usage.cache" for an object nested
+// inside an object field (a list is stepped through without a [] suffix). It
+// returns nil when the path holds no objects.
 //
 // @spec: field-allowlist#allowlist-matches-contract
 func ObjectFields(kind, path string) []string {
+	prop, _ := schemaProperty(kind, path)
+	var out []string
+	for p := range prop.Properties {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// IsList reports whether the field at path on an event kind is a list per the
+// schema. path is dotted as for ObjectFields.
+func IsList(kind, path string) bool {
+	_, list := schemaProperty(kind, path)
+	return list
+}
+
+type schemaNode struct {
+	Ref        string                `json:"$ref"`
+	Const      string                `json:"const"`
+	Type       any                   `json:"type"`
+	Properties map[string]schemaNode `json:"properties"`
+	OneOf      []schemaNode          `json:"oneOf"`
+	Items      *schemaNode           `json:"items"`
+}
+
+// schemaProperty resolves the field at a dotted path on an event kind to the
+// object schema it holds (directly, or as the items of a list) and whether the
+// last segment is a list.
+func schemaProperty(kind, path string) (schemaNode, bool) {
 	b, err := schemaFS.ReadFile(SessionEventSchema)
 	if err != nil {
 		panic(err)
 	}
-	type node struct {
-		Ref        string          `json:"$ref"`
-		Const      string          `json:"const"`
-		Properties map[string]node `json:"properties"`
-		OneOf      []node          `json:"oneOf"`
-	}
 	var doc struct {
-		node
-		Defs map[string]node `json:"$defs"`
+		schemaNode
+		Defs map[string]schemaNode `json:"$defs"`
 	}
 	if err := json.Unmarshal(b, &doc); err != nil {
 		panic(err)
 	}
-	resolve := func(n node) node {
+	resolve := func(n schemaNode) schemaNode {
 		for n.Ref != "" {
 			n = doc.Defs[strings.TrimPrefix(n.Ref, "#/$defs/")]
 		}
 		return n
 	}
-	objectProps := func(n node) map[string]node {
-		n = resolve(n)
-		props := n.Properties
-		for _, alt := range n.OneOf {
-			if alt := resolve(alt); len(alt.Properties) > 0 {
-				props = alt.Properties
+	// object resolves a property to the object it holds, directly or as the
+	// items of a list, looking through a nullable oneOf.
+	object := func(prop schemaNode) (schemaNode, bool) {
+		prop = resolve(prop)
+		alts := append([]schemaNode{prop}, prop.OneOf...)
+		var out schemaNode
+		list := false
+		for _, alt := range alts {
+			alt = resolve(alt)
+			if alt.Items != nil {
+				alt, list = resolve(*alt.Items), true
+			}
+			if len(alt.Properties) > 0 {
+				out = alt
 			}
 		}
-		return props
+		return out, list
 	}
 	segs := strings.Split(path, ".")
 	prop, ok := doc.Properties[segs[0]]
@@ -275,19 +321,14 @@ func ObjectFields(kind, path string) []string {
 		}
 	}
 	if !ok {
-		return nil
+		return schemaNode{}, false
 	}
-	props := objectProps(prop)
+	out, list := object(prop)
 	for _, seg := range segs[1:] {
-		if prop, ok = props[seg]; !ok {
-			return nil
+		if prop, ok = out.Properties[seg]; !ok {
+			return schemaNode{}, false
 		}
-		props = objectProps(prop)
+		out, list = object(prop)
 	}
-	var out []string
-	for p := range props {
-		out = append(out, p)
-	}
-	sort.Strings(out)
-	return out
+	return out, list
 }

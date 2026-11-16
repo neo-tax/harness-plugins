@@ -280,13 +280,22 @@ type Report struct {
 	// API totals every billable request; Events totals the matched turns.
 	API    Usage `json:"api"`
 	Events Usage `json:"events"`
+	// Side totals the side_usage of each session's latest session.closed.
+	Side Usage `json:"side"`
 	// MissingByModel totals the missing requests per model.
 	MissingByModel map[string]Usage `json:"missing_by_model"`
 }
 
+// Unaccounted is the billable tokens neither a matched turn nor side usage
+// reports.
+func (r Report) Unaccounted() int64 { return r.API.Total() - r.Events.Total() - r.Side.Total() }
+
 type turnEvent struct {
-	EventKind string `json:"event_kind"`
-	RequestID string `json:"request_id"`
+	EventKind string  `json:"event_kind"`
+	RequestID string  `json:"request_id"`
+	SessionID string  `json:"session_id"`
+	EndedAt   string  `json:"ended_at"`
+	SideUsage []Usage `json:"side_usage"`
 	Usage     struct {
 		Input        *int64 `json:"input"`
 		Output       *int64 `json:"output"`
@@ -312,10 +321,19 @@ func (e turnEvent) usage() Usage {
 func Compare(records []Record, events []json.RawMessage) (Report, error) {
 	turns := map[string]Usage{}
 	var order []string
+	latestClose := map[string]turnEvent{}
 	for _, raw := range events {
 		var e turnEvent
 		if err := json.Unmarshal(raw, &e); err != nil {
 			return Report{}, err
+		}
+		// The latest close with totals supersedes the others; RFC 3339 UTC
+		// timestamps order as strings.
+		if e.EventKind == "session.closed" {
+			if e.SideUsage != nil && e.EndedAt >= latestClose[e.SessionID].EndedAt {
+				latestClose[e.SessionID] = e
+			}
+			continue
 		}
 		if e.EventKind != "session.turn" || e.RequestID == "" {
 			continue
@@ -326,6 +344,11 @@ func Compare(records []Record, events []json.RawMessage) (Report, error) {
 		turns[e.RequestID] = e.usage()
 	}
 	rep := Report{Missing: []Record{}, Mismatched: []Mismatch{}, Unexplained: []string{}, MissingByModel: map[string]Usage{}}
+	for _, c := range latestClose {
+		for _, u := range c.SideUsage {
+			rep.Side.add(u)
+		}
+	}
 	seen := map[string]bool{}
 	for _, r := range records {
 		if !r.billable() {

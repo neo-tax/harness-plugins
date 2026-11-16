@@ -41,7 +41,8 @@ func TestStatementListsEveryFieldPerKind(t *testing.T) {
 }
 
 // missingRows returns the row for every field in fields, at any depth, that
-// section lacks. Each row names the field by its full dotted path.
+// section lacks. Each row names the field by its full dotted path, with []
+// after a list.
 func missingRows(section, prefix string, fields []allowlist.Field) []string {
 	var out []string
 	for _, f := range fields {
@@ -49,9 +50,30 @@ func missingRows(section, prefix string, fields []allowlist.Field) []string {
 		if !strings.Contains(section, row) {
 			out = append(out, row)
 		}
-		out = append(out, missingRows(section, prefix+f.Name+".", f.Children)...)
+		parent := prefix + f.Name
+		if f.List {
+			parent += "[]"
+		}
+		out = append(out, missingRows(section, parent+".", f.Children)...)
 	}
 	return out
+}
+
+// @spec: field-allowlist#statement-names-identity-line
+// @spec: field-allowlist#statement-names-incidental-identity
+func TestStatementNamesIdentityLine(t *testing.T) {
+	s := allowlist.Statement()
+	for _, want := range []string{
+		"Neo.Tax receives two values meant to identify the engineer: the email the engineer confirms at enrollment",
+		"git `user.email` in effect for the repository",
+		"`branch` is free text the engineer or their tools choose",
+		"`repo.owner` is the account that owns the repository, which is a personal username",
+		"The device hostname, sent once at enrollment",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("statement lacks %q", want)
+		}
+	}
 }
 
 // A field nested two levels deep is still let through by Apply, so the
@@ -80,22 +102,5 @@ func TestStatementListsNestedFieldsAtAnyDepth(t *testing.T) {
 	oneLevel := "| `usage` | Token counts. |\n| `usage.input_tokens` | Input tokens. |\n| `usage.cache` | Cache counts. |\n"
 	if missing := missingRows(oneLevel, "", fields); len(missing) != 1 || missing[0] != want {
 		t.Errorf("one-level rendering: missing %v, want only %q", missing, want)
-	}
-}
-
-// @spec: field-allowlist#statement-names-identity-line
-// @spec: field-allowlist#statement-names-incidental-identity
-func TestStatementNamesIdentityLine(t *testing.T) {
-	s := allowlist.Statement()
-	for _, want := range []string{
-		"Neo.Tax receives two values meant to identify the engineer: the email the engineer confirms at enrollment",
-		"git `user.email` in effect for the repository",
-		"`branch` is free text the engineer or their tools choose",
-		"`repo.owner` is the account that owns the repository, which is a personal username",
-		"The device hostname, sent once at enrollment",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("statement lacks %q", want)
-		}
 	}
 }

@@ -24,6 +24,10 @@ The code that runs on an engineer's machine to observe AI coding sessions and re
 
 **Usage**: The token counts and pricing attributes of one turn (input, output, cache write by TTL, cache read, service tier), with a source of payload, transcript, or unknown. _Avoid_: cost, spend (those are dollars, computed server-side)
 
+**Side usage**: The usage of a session's model calls that produced no turn of their own (in Claude Code: the session title, the recap after time away, compaction's summary), reported per model on `session.closed` as the harness's session totals less every turn. _Avoid_: overhead, hidden usage, background usage
+
+**Session totals**: The per-model token counts a harness records for a whole session, side calls and subagents included; Claude Code writes them as `cost-state` lines.
+
 **Device**: One harness installation on one machine for one engineer, identified by a device id minted at enrollment.
 
 **Device key**: The credential a device holds after enrollment; it carries the engineer's confirmed email and authorizes session ingest only. _Avoid_: API key, token, machine key

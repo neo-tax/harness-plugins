@@ -139,3 +139,30 @@ func TestCompare(t *testing.T) {
 		t.Errorf("events total = %d (unmatched events excluded)", got)
 	}
 }
+
+// Side usage on a session's latest close counts toward what events report;
+// an earlier close of the same session is superseded, not added.
+func TestCompareCountsSideUsage(t *testing.T) {
+	recs := []usageaudit.Record{
+		{Path: "/v1/messages", RequestID: "req_turn", Status: 200, Usage: usageaudit.Usage{Input: 2, Output: 10}},
+		{Path: "/v1/messages", RequestID: "req_title", Model: "claude-haiku-5-5", Status: 200, Usage: usageaudit.Usage{Input: 300, Output: 8}},
+	}
+	events := []json.RawMessage{
+		json.RawMessage(`{"event_kind":"session.turn","request_id":"req_turn","usage":{"input":2,"output":10}}`),
+		json.RawMessage(`{"event_kind":"session.closed","session_id":"s","ended_at":"2026-10-26T10:00:00Z","side_usage":[{"model":"claude-haiku-5-5","input":100,"output":1,"cache_write_5m":0,"cache_write_1h":0,"cache_read":0}]}`),
+		json.RawMessage(`{"event_kind":"session.closed","session_id":"s","ended_at":"2026-10-26T11:00:00Z","side_usage":[{"model":"claude-haiku-5-5","input":300,"output":8,"cache_write_5m":0,"cache_write_1h":0,"cache_read":0}]}`),
+		json.RawMessage(`{"event_kind":"session.closed","session_id":"t","ended_at":"2026-10-26T11:00:00Z","side_usage":null}`),
+		// A later close with no totals does not supersede the one before.
+		json.RawMessage(`{"event_kind":"session.closed","session_id":"s","ended_at":"2026-10-26T12:00:00Z","side_usage":null}`),
+	}
+	rep, err := usageaudit.Compare(recs, events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (usageaudit.Usage{Input: 300, Output: 8}); rep.Side != want {
+		t.Errorf("side = %+v, want %+v", rep.Side, want)
+	}
+	if got := rep.Unaccounted(); got != 0 {
+		t.Errorf("unaccounted = %d, want 0", got)
+	}
+}

@@ -44,13 +44,17 @@ Prompt text, completion text, tool inputs, tool outputs, file paths, the working
 }
 
 // writeRows writes one table row per field, then recurses into its Children
-// under the field's dotted name, so the statement lists every field Apply
+// under the field's dotted name (suffixed [] for a list), so the statement lists every field Apply
 // lets through at any depth.
 //
 // @spec: field-allowlist#statement-per-event-kind
 func writeRows(b *strings.Builder, prefix string, fields []Field) {
 	for _, f := range fields {
 		fmt.Fprintf(b, "| `%s%s` | %s |\n", prefix, f.Name, f.Description)
-		writeRows(b, prefix+f.Name+".", f.Children)
+		parent := prefix + f.Name
+		if f.List {
+			parent += "[]"
+		}
+		writeRows(b, parent+".", f.Children)
 	}
 }
