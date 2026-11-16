@@ -4,8 +4,8 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-10-24
-updated: 2026-11-14
-version: 4
+updated: 2026-11-15
+version: 5
 affects:
   - internal/queue/*.go
   - internal/enroll/*.go
@@ -43,6 +43,7 @@ Governs how a device obtains its device key: the enrollment token an admin mints
 - `browser-form-retries`(tested): A rejected token or an invalid email is reported in the form, which stays open for another try without the login command being run again.
 - `browser-exchange-outlives-request`(tested): Once the browser form is submitted, the enrollment exchange runs to completion even if the browser drops the request, so a token the server has spent always leaves its device key stored.
 - `browser-wait-bounded`(tested): The agent waits at most five minutes for the browser form, then exits reporting that login was not completed.
+- `backfill-disclosed-before-enrolling`(tested): Before the engineer submits, the login form says, above its button, that enrolling also sends the metadata of every Claude Code session already on the machine, from every project, and names what that metadata is and is not; on a terminal the same notice is printed before the prompts. Login still backfills the whole history; the engineer learns that before enrolling, not after.
 - `browser-terminal-alternative`(tested): Whether or not a browser opened, the agent's output names the login command to run in a terminal, for a machine whose browser cannot reach the form (for example over SSH).
 - `login-skill-delegates-to-agent`(tested): In Claude Code, `neo-tax:login` is a skill whose only job is to instruct the model to run the agent's login command; it holds no logic of its own.
 - `email-candidates`(tested): At login the agent offers the engineer the global git `user.email` and, when present, the email from the harness's own account file, at the terminal prompt or in the browser form, and also accepts a typed email.

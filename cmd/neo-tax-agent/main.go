@@ -163,7 +163,8 @@ func login(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		AccountEmail: claudecode.AccountEmail,
 		Interactive:  interactive, In: stdin, Out: stdout, ReadSecret: readSecret,
 		Browser: !interactive, OpenURL: browserOpener(), TerminalCommand: terminalCommand(d, *server),
-		HTTP: &http.Client{Timeout: 30 * time.Second},
+		Notice: backfillNotice,
+		HTTP:   &http.Client{Timeout: 30 * time.Second},
 	})
 	switch {
 	case errors.Is(err, enroll.ErrNeedInput):
@@ -183,6 +184,12 @@ func login(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fmt.Fprintln(stdout, "Sending your existing Claude Code sessions in the background.")
 	return 0
 }
+
+// backfillNotice tells the engineer, before they enroll, that enrolling
+// also sends their past sessions, which the backfill after login does.
+//
+// @spec: device-enrollment#backfill-disclosed-before-enrolling
+const backfillNotice = "Enrolling also sends Neo.Tax the metadata of every Claude Code session already on this machine, from every project: when each ran, its models and token counts, its repository, branches, and commit, and the pull requests it linked. Prompts, responses, code, and file paths are never sent."
 
 // openURL opens the login form in the engineer's browser.
 var openURL = enroll.OpenBrowser

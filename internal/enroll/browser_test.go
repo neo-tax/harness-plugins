@@ -526,3 +526,33 @@ func TestBrowserSubmitDroppedMidExchangeStillEnrolls(t *testing.T) {
 		t.Fatalf("no key stored after the browser dropped its submit: %v", err)
 	}
 }
+
+// What enrolling also sends is shown on the form, above its button, before
+// the engineer submits; on a terminal it is printed before the prompts.
+// @spec: device-enrollment#backfill-disclosed-before-enrolling
+func TestNoticeShownBeforeEnrolling(t *testing.T) {
+	const notice = "Enrolling also sends past sessions."
+	f := newFixture(t)
+	f.notice = notice
+	u, done := f.browserLogin(t, time.Minute, nil)
+	_, page := get(t, u)
+	if n, b := strings.Index(page, notice), strings.Index(page, `<button type="submit">`); n < 0 || n > b {
+		t.Fatalf("notice not above the button:\n%s", page)
+	}
+	submit(t, u, url.Values{"token": {"et_good"}, "email": {"account@example.com"}})
+	if err := wait(t, done); err != nil {
+		t.Fatal(err)
+	}
+
+	f = newFixture(t)
+	f.notice = notice
+	o := f.opts("", "")
+	o.Interactive = true
+	o.In = strings.NewReader("et_good\n2\n")
+	if err := enroll.Login(context.Background(), o); err != nil {
+		t.Fatal(err)
+	}
+	if n, p := strings.Index(f.out.String(), notice), strings.Index(f.out.String(), "Paste the enrollment token"); n < 0 || n > p {
+		t.Fatalf("notice not before the prompts:\n%s", f.out.String())
+	}
+}
