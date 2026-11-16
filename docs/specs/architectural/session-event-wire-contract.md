@@ -4,8 +4,8 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-10-24
-updated: 2026-11-14
-version: 11
+updated: 2026-11-15
+version: 12
 affects:
   - contract/*.schema.json
   - contract/*.go
@@ -32,7 +32,7 @@ The plugin's ingest endpoint is one of Neo.Tax's two entry points into the sessi
   - status-reason: unmerged: built in platform-new #5601, which is still open, in projects/server/src/harness-ingest/harness-contract.ts (ACCEPTED_CONTRACT_VERSIONS); only version 1 exists so far
 - `event-kinds`(tested): A session event has exactly one of the kinds `session.opened`, `session.turn`, `session.pr_linked`, or `session.closed`.
 - `envelope-fields`(tested): Every session event carries `contract_version`, `device_id`, `harness`, `harness_version`, `agent_version`, `session_id`, `event_kind`, and `sent_at`, and no other envelope field.
-- `opened-fields`(tested): A `session.opened` event carries `started_at`, `entrypoint`, `source`, `repo`, `branch`, `head_sha`, `git_user_email`, and `dropped_events`.
+- `opened-fields`(tested): A `session.opened` event carries `started_at`, `entrypoint`, `source`, `repo`, `branch`, `head_sha`, and `dropped_events`.
 - `turn-fields`(tested): A `session.turn` event carries `message_id`, `request_id`, `subagent_id`, `timestamp`, `model`, `branch`, `head_sha`, and `usage`.
 - `usage-shape`(tested): `usage` carries `input`, `output`, `cache_write_5m`, `cache_write_1h`, `cache_read`, `service_tier`, `speed`, and `source`, where `speed` is the speed the harness reports the call ran at (Claude Code: `standard` or `fast`) or null when it reports none, and `source` is one of `payload`, `transcript`, or `unknown`, and every count is null when `source` is `unknown`.
 - `pr-linked-fields`(tested): A `session.pr_linked` event carries `repo`, `number`, and `first_seen_at`, the time the session's transcript first records the link.

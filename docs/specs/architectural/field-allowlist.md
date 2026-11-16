@@ -4,8 +4,8 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-10-24
-updated: 2026-11-13
-version: 6
+updated: 2026-11-15
+version: 7
 affects:
   - internal/allowlist/*.go
   - contract/types.go
@@ -35,11 +35,11 @@ Governs the single list of fields the agent is permitted to emit, how it is enfo
 - `content-excluded`(tested): Prompt text, completion text, tool inputs, tool outputs, and file paths are not on the allowlist for any event kind.
 - `request-id-included`(tested): The vendor's API request id is on the allowlist for `session.turn`.
 - `side-usage-included`(tested): Per-model token counts of the API calls that produced no turn are on the allowlist for `session.closed` as `side_usage`, carrying the model name and counts only.
-- `git-user-email-included`(tested): The git `user.email` in effect for the session's repository (its own config, else the engineer's global git config) is on the allowlist for `session.opened` only.
+- `git-user-email-excluded`(tested): No event carries the engineer's git `user.email`. Events identify only their device; Neo.Tax knows the engineer from the email confirmed when the device enrolled. (Until 2026-11-15 `session.opened` carried the git email as a join signal for pull-request authors; it was dropped so that no event names the engineer.)
 - `content-bearing-payloads-reduced`(tested): A hook payload that carries model output is reduced to its usage counts inside the agent before any of it is written to disk.
 - `privacy-statement-generated`(tested): The published privacy statement's field table is generated from the allowlist in code, and CI fails when the committed statement differs from the generated one.
 - `statement-per-event-kind`(tested): The generated statement lists, per event kind, every field and a one-line description of what it contains.
-- `statement-names-identity-line`(tested): The statement names the two values meant to identify the engineer: the email the engineer confirms at enrollment and the git email in effect for the repository as a join signal.
+- `statement-names-identity-line`(tested): The statement names the one value meant to identify the engineer, the email the engineer confirms at enrollment, and says events carry only the device id.
 - `statement-names-incidental-identity`(tested): The statement says plainly that `branch` is free text the engineer chooses and `repo.owner` can be a personal account name, and that the device hostname sent at enrollment often contains the engineer's name, so each can identify a person although none is meant to.
 - `statement-covers-enrollment`(tested): The generated statement has an "At enrollment" section, generated from the enrollment request in the wire contract, that lists every field the request carries with a one-line description and says it is sent once per enrollment or re-enrollment.
 - `change-updates-this-spec`(built): Adding or removing a field from the allowlist updates the requirements of this spec in the same change.

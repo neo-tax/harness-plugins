@@ -29,7 +29,7 @@ func typedEvents() []any {
 	r := &contract.Repo{Host: "github.com", Owner: "neo-tax", Name: "harness-plugins"}
 	ts := time.Date(2026, 10, 25, 16, 0, 1, 0, time.UTC)
 	return []any{
-		contract.NewOpened(testEnvelope, contract.OpenedFields{StartedAt: ts, Entrypoint: ptr("cli"), Source: ptr("startup"), Repo: r, Branch: ptr("main"), HeadSHA: sha, GitUserEmail: ptr("e@example.com")}),
+		contract.NewOpened(testEnvelope, contract.OpenedFields{StartedAt: ts, Entrypoint: ptr("cli"), Source: ptr("startup"), Repo: r, Branch: ptr("main"), HeadSHA: sha}),
 		contract.NewTurn(testEnvelope, contract.TurnFields{MessageID: "msg_1", Timestamp: ts, Usage: contract.UnknownUsage()}),
 		contract.NewTurn(testEnvelope, contract.TurnFields{MessageID: "msg_2", SubagentID: ptr("a1"), Timestamp: ts, Model: ptr("claude-opus-5-5"), Usage: contract.Usage{
 			Input: ptr(int64(1)), Output: ptr(int64(2)), CacheWrite5m: ptr(int64(0)), CacheWrite1h: ptr(int64(3)), CacheRead: ptr(int64(4)), ServiceTier: ptr("standard"), Speed: ptr("fast"), Source: contract.UsageSourceTranscript,

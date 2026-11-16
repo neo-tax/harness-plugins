@@ -110,7 +110,7 @@ func TestSessionStartEmitsOpened(t *testing.T) {
 	dev, _ := enroll.Load(h.data)
 	want := map[string]any{
 		"event_kind": "session.opened", "source": "resume", "entrypoint": "cli", "branch": "Main-Branch",
-		"git_user_email": "dev@example.com", "session_id": "fixture-session", "device_id": dev.DeviceID,
+		"session_id": "fixture-session", "device_id": dev.DeviceID,
 		"harness": "claude-code", "harness_version": "2.1.311", "started_at": "2026-10-25T12:00:00Z", "dropped_events": float64(0),
 	}
 	for k, v := range want {

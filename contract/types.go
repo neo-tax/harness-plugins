@@ -69,7 +69,6 @@ type OpenedFields struct {
 	Repo          *Repo     `json:"repo"`
 	Branch        *string   `json:"branch"`
 	HeadSHA       *string   `json:"head_sha"`
-	GitUserEmail  *string   `json:"git_user_email"`
 	DroppedEvents int64     `json:"dropped_events"`
 }
 

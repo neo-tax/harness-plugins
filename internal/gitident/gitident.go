@@ -30,10 +30,6 @@ type Identity struct {
 	Repo    *contract.Repo
 	Branch  *string
 	HeadSHA *string
-	// UserEmail is the repository's effective user.email: its own config,
-	// else the engineer's global config. It is a join signal for
-	// pull-request authorship, not identity.
-	UserEmail *string
 }
 
 // Identify returns the repository identity of dir with exactly one git
@@ -102,16 +98,6 @@ func Identify(dir string) Identity {
 	env := includeEnv{gitDirs: []string{gitDir, commonDir}, branch: id.Branch}
 	cfg := readConfig(filepath.Join(commonDir, "config"), env)
 	id.Repo = ParseRemoteURL(cfg.remoteURL(id.Branch))
-	email := cfg.userEmail
-	for _, g := range globalConfigs() {
-		if email != "" {
-			break
-		}
-		email = readConfig(g, env).userEmail
-	}
-	if email != "" {
-		id.UserEmail = &email
-	}
 	return id
 }
 
@@ -149,29 +135,6 @@ type gitConfig struct {
 	remotes      []string          // names in configuration order
 	remoteURLs   map[string]string // name -> first url
 	branchRemote map[string]string // branch -> remote name
-	userEmail    string
-}
-
-// globalConfigs are the engineer's global git config files, highest
-// precedence first.
-func globalConfigs() []string {
-	if g := os.Getenv("GIT_CONFIG_GLOBAL"); g != "" {
-		return []string{g}
-	}
-	var out []string
-	if home, err := os.UserHomeDir(); err == nil {
-		out = append(out, filepath.Join(home, ".gitconfig"))
-	}
-	xdg := os.Getenv("XDG_CONFIG_HOME")
-	if xdg == "" {
-		if home, err := os.UserHomeDir(); err == nil {
-			xdg = filepath.Join(home, ".config")
-		}
-	}
-	if xdg != "" {
-		out = append(out, filepath.Join(xdg, "git", "config"))
-	}
-	return out
 }
 
 // remoteURL picks origin, else the current branch's upstream remote, else the
@@ -199,7 +162,7 @@ type includeEnv struct {
 	branch  *string
 }
 
-// readConfig reads remote URLs, branch remotes, and user.email from a git
+// readConfig reads remote URLs and branch remotes from a git
 // config file, following include.path and includeIf (gitdir:, gitdir/i:,
 // onbranch:) where they appear, as git does. Other conditions are not
 // evaluated and their includes are skipped.
@@ -253,8 +216,6 @@ func (cfg *gitConfig) parse(path string, env includeEnv, depth int) {
 			}
 		case section == "branch" && key == "remote":
 			cfg.branchRemote[sub] = value
-		case section == "user" && sub == "" && key == "email":
-			cfg.userEmail = value // the last value wins, as in git
 		case key == "path" && (section == "include" && sub == "" || section == "includeif" && env.matches(sub, path)):
 			cfg.parse(includePath(value, path), env, depth+1)
 		}

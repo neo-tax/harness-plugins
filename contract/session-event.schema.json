@@ -75,7 +75,7 @@
     },
     "opened": {
       "type": "object",
-      "required": ["event_kind", "started_at", "entrypoint", "source", "repo", "branch", "head_sha", "git_user_email", "dropped_events"],
+      "required": ["event_kind", "started_at", "entrypoint", "source", "repo", "branch", "head_sha", "dropped_events"],
       "properties": {
         "event_kind": { "const": "session.opened" },
         "started_at": { "$ref": "#/$defs/timestamp" },
@@ -84,7 +84,6 @@
         "repo": { "$ref": "#/$defs/repo" },
         "branch": { "$ref": "#/$defs/nullable_string" },
         "head_sha": { "$ref": "#/$defs/head_sha" },
-        "git_user_email": { "$ref": "#/$defs/nullable_string" },
         "dropped_events": { "type": "integer", "minimum": 0 }
       }
     },

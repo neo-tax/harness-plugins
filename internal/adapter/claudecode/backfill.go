@@ -554,12 +554,11 @@ func backfillOne(a *agent.Agent, path, deviceID string, copied map[string]bool, 
 		agent.Logf(o.DataDir, "backfill transcript read failed: %s", errClass(err))
 	}
 	opened := contract.NewOpened(ctx.envelope(start.Version), contract.OpenedFields{
-		StartedAt:    start.Timestamp.UTC(),
-		Entrypoint:   nonEmpty(start.Entrypoint),
-		Source:       source,
-		Repo:         git.Repo,
-		Branch:       nonEmpty(start.GitBranch),
-		GitUserEmail: git.UserEmail,
+		StartedAt:  start.Timestamp.UTC(),
+		Entrypoint: nonEmpty(start.Entrypoint),
+		Source:     source,
+		Repo:       git.Repo,
+		Branch:     nonEmpty(start.GitBranch),
 	})
 	events := append([]any{opened}, res.Events...)
 	// The close carries the version the session ended on, as SessionEnd's

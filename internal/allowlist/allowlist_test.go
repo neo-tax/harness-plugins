@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/neo-tax/harness-plugins/contract"
@@ -92,14 +93,15 @@ func TestNoContentBearingFieldIsAllowed(t *testing.T) {
 }
 
 // @spec: field-allowlist#request-id-included
-// @spec: field-allowlist#git-user-email-included
+// @spec: field-allowlist#git-user-email-excluded
 func TestIdentityAndRequestIDPlacement(t *testing.T) {
 	for _, kind := range allowlist.Kinds() {
 		fields, _ := allowlist.For(kind)
 		got := names(fields)
-		hasEmail := contains(got, "git_user_email")
-		if hasEmail != (kind == contract.KindOpened) {
-			t.Errorf("%s: git_user_email allowed=%v", kind, hasEmail)
+		for _, f := range got {
+			if strings.Contains(f, "email") {
+				t.Errorf("%s: %s allowed; no event names the engineer", kind, f)
+			}
 		}
 		if kind == contract.KindTurn && !contains(got, "request_id") {
 			t.Errorf("request_id not allowed on %s", kind)

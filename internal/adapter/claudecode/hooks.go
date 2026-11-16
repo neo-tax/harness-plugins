@@ -185,7 +185,6 @@ func emit(a *agent.Agent, name string, p payload, o HookOptions) error {
 			Repo:          git.Repo,
 			Branch:        git.Branch,
 			HeadSHA:       git.HeadSHA,
-			GitUserEmail:  git.UserEmail,
 			DroppedEvents: dropped,
 		}))
 		carried = dropped

@@ -63,7 +63,6 @@ func validOpened() map[string]any {
 		"repo":           repo(),
 		"branch":         "main",
 		"head_sha":       "96e5e8f0000000000000000000000000000000aa",
-		"git_user_email": "engineer@example.com",
 		"dropped_events": 0,
 	})
 }
