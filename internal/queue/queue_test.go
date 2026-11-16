@@ -350,13 +350,19 @@ func TestQueueCapDropsOldestSegmentAndCounts(t *testing.T) {
 	if total > e.q.Cap {
 		t.Fatalf("queue is %d bytes, cap %d", total, e.q.Cap)
 	}
-	dropped := e.q.TakeDropped()
+	dropped := e.q.State().DroppedEvents
 	kept := lineCount(t, e.files("queue", "*.jsonl"))
 	if dropped == 0 || int(dropped)+kept != 20*perSeg {
 		t.Fatalf("dropped %d kept %d of %d", dropped, kept, 20*perSeg)
 	}
-	if e.q.TakeDropped() != 0 {
-		t.Fatal("dropped count not reset")
+	// Consuming what an event carried keeps drops counted since.
+	e.q.ConsumeDropped(dropped - 1)
+	if got := e.q.State().DroppedEvents; got != 1 {
+		t.Fatalf("after consume: %d", got)
+	}
+	e.q.ConsumeDropped(5)
+	if got := e.q.State().DroppedEvents; got != 0 {
+		t.Fatalf("over-consume: %d", got)
 	}
 	e.flush()
 	if got := e.recorded(); got[len(got)-1]["message_id"] != fmt.Sprintf("s19-%05d", perSeg-1) {

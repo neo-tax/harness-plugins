@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"log"
-	"os"
 
 	"github.com/neo-tax/harness-plugins/contract"
 	"github.com/neo-tax/harness-plugins/internal/allowlist"
@@ -24,7 +23,7 @@ type Agent struct {
 
 // New returns an agent over the harness-provided plugin data directory.
 func New(dataDir string) *Agent {
-	return &Agent{DataDir: dataDir, Queue: queue.New(dataDir), Log: log.New(os.Stderr, "neo-tax-agent: ", 0)}
+	return &Agent{DataDir: dataDir, Queue: queue.New(dataDir), Log: log.New(logFile(dataDir), "", 0)}
 }
 
 // preEnrollmentDeviceID stands in for an empty device_id while validating, so

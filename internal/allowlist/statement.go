@@ -24,7 +24,7 @@ The neo-tax plugin reports metadata about AI coding sessions so Neo.Tax can attr
 
 ## Identity
 
-Neo.Tax receives two values meant to identify the engineer: the email the engineer confirms at enrollment, which is stored with the device's key rather than sent with each event, and the repository-level git ` + "`user.email`" + ` on ` + "`session.opened`" + `, used only to join sessions to pull-request authors.
+Neo.Tax receives two values meant to identify the engineer: the email the engineer confirms at enrollment, which is stored with the device's key rather than sent with each event, and the git ` + "`user.email`" + ` in effect for the repository on ` + "`session.opened`" + `, used only to join sessions to pull-request authors.
 
 Three other values are not meant to identify anyone but can. ` + "`branch`" + ` is free text the engineer or their tools choose, so it can contain a name, a username, or anything else typed into it. ` + "`repo.owner`" + ` is the account that owns the repository, which is a personal username when the repository lives under a personal account rather than an organization. The device hostname, sent once at enrollment as a readable name for the device, often contains the engineer's name.
 

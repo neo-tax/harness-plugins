@@ -355,3 +355,93 @@ func TestSymlinkedSubdirectoryResolves(t *testing.T) {
 		t.Fatalf("%+v", id.Repo)
 	}
 }
+
+// The effective user.email for the repository: its own config first, then
+// the engineer's global config, read without another git process.
+// @spec: field-allowlist#git-user-email-included
+func TestUserEmail(t *testing.T) {
+	dir := newRepo(t)
+	global := filepath.Join(t.TempDir(), "gitconfig")
+	os.WriteFile(global, []byte("[user]\n\tname = X\n\temail = global@example.com\n"), 0o600)
+	t.Setenv("GIT_CONFIG_GLOBAL", global)
+	if got := str(gitident.Identify(dir).UserEmail); got != "global@example.com" {
+		t.Errorf("global: %s", got)
+	}
+	git(t, dir, "config", "user.email", "Repo@Example.com")
+	if got := str(gitident.Identify(dir).UserEmail); got != "Repo@Example.com" {
+		t.Errorf("repo: %s", got)
+	}
+	if id := gitident.Identify(t.TempDir()); id.UserEmail != nil {
+		t.Errorf("outside git: %s", str(id.UserEmail))
+	}
+}
+
+// Config includes are followed where git would follow them, so a work email
+// scoped to a directory with includeIf is the one reported.
+func TestUserEmailFollowsIncludes(t *testing.T) {
+	work := filepath.Join(t.TempDir(), "work")
+	os.MkdirAll(work, 0o755)
+	dir := filepath.Join(work, "repo")
+	os.MkdirAll(dir, 0o755)
+	git(t, dir, "init", "-q", "-b", "main")
+	cfgDir := t.TempDir()
+	os.WriteFile(filepath.Join(cfgDir, "work.inc"), []byte("[user]\n\temail = work@example.com\n"), 0o600)
+	os.WriteFile(filepath.Join(cfgDir, "other.inc"), []byte("[user]\n\temail = other@example.com\n"), 0o600)
+	global := filepath.Join(cfgDir, "gitconfig")
+	os.WriteFile(global, []byte(`[user]
+	email = personal@example.com
+[includeIf "gitdir:/nowhere/"]
+	path = other.inc
+[includeIf "gitdir:`+work+`/"]
+	path = work.inc
+`), 0o600)
+	t.Setenv("GIT_CONFIG_GLOBAL", global)
+	if got := str(gitident.Identify(dir).UserEmail); got != "work@example.com" {
+		t.Fatalf("got %s", got)
+	}
+	os.WriteFile(global, []byte("[include]\n\tpath = other.inc\n[user]\n\temail = after@example.com\n"), 0o600)
+	if got := str(gitident.Identify(dir).UserEmail); got != "after@example.com" {
+		t.Fatalf("later value must win: %s", got)
+	}
+}
+
+// A remote defined in an included file is found.
+func TestRemoteFromIncludedConfig(t *testing.T) {
+	dir := newRepo(t)
+	inc := filepath.Join(t.TempDir(), "remotes.inc")
+	os.WriteFile(inc, []byte("[remote \"origin\"]\n\turl = git@github.com:neo-tax/included.git\n"), 0o600)
+	git(t, dir, "config", "include.path", inc)
+	if r := gitident.Identify(dir).Repo; r == nil || r.Name != "included" {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestConditionalIncludeKinds(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := filepath.Join(home, "Work")
+	dir := filepath.Join(work, "repo")
+	os.MkdirAll(dir, 0o755)
+	git(t, dir, "init", "-q", "-b", "main")
+	git(t, dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "x")
+	cfg := t.TempDir()
+	os.WriteFile(filepath.Join(cfg, "a.inc"), []byte("[user]\n\temail = matched@example.com\n"), 0o600)
+	global := filepath.Join(cfg, "gitconfig")
+	t.Setenv("GIT_CONFIG_GLOBAL", global)
+	check := func(name, cond, want string) {
+		t.Helper()
+		os.WriteFile(global, []byte("[user]\n\temail = default@example.com\n[includeIf \""+cond+"\"]\n\tpath = a.inc\n"), 0o600)
+		if got := str(gitident.Identify(dir).UserEmail); got != want {
+			t.Errorf("%s (%s): got %s, want %s", name, cond, got, want)
+		}
+	}
+	check("onbranch other", "onbranch:feature/", "default@example.com")
+	git(t, dir, "checkout", "-q", "-b", "feature/x")
+	check("onbranch prefix", "onbranch:feature/", "matched@example.com")
+	git(t, dir, "checkout", "-q", "--detach")
+	check("onbranch detached", "onbranch:feature/", "default@example.com")
+	check("gitdir/i case", "gitdir/i:"+strings.ToUpper(work)+"/", "matched@example.com")
+	check("gitdir case-sensitive", "gitdir:"+strings.ToUpper(work)+"/", "default@example.com")
+	check("gitdir home", "gitdir:~/Work/", "matched@example.com")
+	check("gitdir bare name", "gitdir:repo/.git", "matched@example.com")
+}

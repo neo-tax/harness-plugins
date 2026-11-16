@@ -1,0 +1,64 @@
+#!/bin/sh
+# Finds the neo-tax-agent binary for this plugin's version, downloading and
+# verifying it from the GitHub release on first use, and execs it with the
+# same arguments and standard input.
+#
+# NEO_TAX_AGENT_BIN overrides the binary (development and CI).
+set -eu
+
+# Hooks pass the plugin data directory; a skill's Bash call does not, so
+# fall back to where Claude Code keeps data for neo-tax@neo-tax.
+NEO_TAX_DATA_DIR="${NEO_TAX_DATA_DIR:-${CLAUDE_PLUGIN_DATA:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/data/neo-tax-neo-tax}}"
+export NEO_TAX_DATA_DIR
+
+if [ -n "${NEO_TAX_AGENT_BIN:-}" ]; then
+  exec "$NEO_TAX_AGENT_BIN" "$@"
+fi
+
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+version=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$root/.claude-plugin/plugin.json" | head -n 1)
+repo="neo-tax/harness-plugins"
+
+case "$(uname -s)" in
+  Darwin) os=darwin ;;
+  Linux) os=linux ;;
+  MINGW*|MSYS*|CYGWIN*) os=windows ;;
+  *) echo "neo-tax-agent: unsupported OS $(uname -s)" >&2; exit 0 ;;
+esac
+case "$(uname -m)" in
+  x86_64|amd64) arch=amd64 ;;
+  arm64|aarch64) arch=arm64 ;;
+  *) echo "neo-tax-agent: unsupported architecture $(uname -m)" >&2; exit 0 ;;
+esac
+ext=""
+[ "$os" = windows ] && ext=".exe"
+
+cache="$NEO_TAX_DATA_DIR/bin"
+bin="$cache/neo-tax-agent-v$version$ext"
+
+if [ ! -x "$bin" ]; then
+  asset="neo-tax-agent_${os}_${arch}${ext}"
+  base="https://github.com/$repo/releases/download/v$version"
+  mkdir -p "$cache"
+  tmp=$(mktemp "$cache/.download.XXXXXX")
+  trap 'rm -f "$tmp" "$tmp.sums"' EXIT
+  if ! curl -fsSL --connect-timeout 10 --max-time 15 -o "$tmp" "$base/$asset" || ! curl -fsSL --connect-timeout 10 --max-time 15 -o "$tmp.sums" "$base/checksums.txt"; then
+    echo "neo-tax-agent: could not download $asset for v$version" >&2
+    exit 0
+  fi
+  want=$(awk -v f="$asset" '$2 == f || $2 == "*" f { print $1 }' "$tmp.sums")
+  if command -v sha256sum >/dev/null 2>&1; then
+    got=$(sha256sum "$tmp" | awk '{ print $1 }')
+  else
+    got=$(shasum -a 256 "$tmp" | awk '{ print $1 }')
+  fi
+  if [ -z "$want" ] || [ "$want" != "$got" ]; then
+    echo "neo-tax-agent: checksum mismatch for $asset" >&2
+    exit 0
+  fi
+  rm -f "$tmp.sums"
+  chmod 755 "$tmp"
+  mv -f "$tmp" "$bin"
+fi
+
+exec "$bin" "$@"

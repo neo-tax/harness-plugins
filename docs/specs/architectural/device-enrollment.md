@@ -12,6 +12,7 @@ affects:
   - internal/ingest/*.go
   - internal/adapter/claudecode/account.go
   - cmd/neo-tax-agent/*.go
+  - plugins/claude-code/skills/login/SKILL.md
 ---
 
 # Device enrollment
@@ -29,7 +30,7 @@ Governs how a device obtains its device key: the enrollment token an admin mints
 - `device-key-revocable-individually`(approved): Revoking one device key does not affect any other device key, including others minted from the same enrollment token.
 - `one-key-per-device`(tested): A device holds exactly one device key; enrolling again replaces it.
 - `interactive-enrollment`(tested): The engineer enrolls by invoking the harness's `neo-tax:login` entry point, which runs the agent's login command; the agent prompts for the enrollment token and the email.
-- `login-skill-delegates-to-agent`(approved): In Claude Code, `neo-tax:login` is a skill whose only job is to instruct the model to run the agent's login command; it holds no logic of its own.
+- `login-skill-delegates-to-agent`(tested): In Claude Code, `neo-tax:login` is a skill whose only job is to instruct the model to run the agent's login command; it holds no logic of its own.
 - `email-candidates`(tested): At login the agent offers the engineer the global git `user.email` and, when present, the email from the harness's own account file, and also accepts a typed email.
 - `email-confirmed-by-engineer`(tested): An interactive enrollment sends `email_confirmed_by` as `engineer`.
 - `key-storage-location`(tested): The device key and device id are stored in the harness-provided plugin data directory, readable only by the owning user.
@@ -41,7 +42,7 @@ Governs how a device obtains its device key: the enrollment token an admin mints
 
 ## Design Notes
 
-Harness hook payloads carry no user identity, and the only on-disk sources (git `user.email`, the harness's own account file) are either per-repository or belong to another product. Capturing identity once at enrollment, where the engineer confirms it, and storing it on the device key means every session event afterwards carries only the device id: the hook path never reads identity, no per-session field is personal, and the server resolves device to email to contributor through its existing contributor matcher. A shared or re-imaged machine therefore needs re-enrollment, since a device key is one engineer on one machine. The repository-level git `user.email` is still recorded per session as a secondary, non-identifying join signal for pull-request authorship, because the server's GitHub email mapping already keys on it.
+Harness hook payloads carry no user identity, and the only on-disk sources (git `user.email`, the harness's own account file) are either per-repository or belong to another product. Capturing identity once at enrollment, where the engineer confirms it, and storing it on the device key means every session event afterwards carries only the device id: the hook path never reads identity, no per-session field is personal, and the server resolves device to email to contributor through its existing contributor matcher. A shared or re-imaged machine therefore needs re-enrollment, since a device key is one engineer on one machine. The git `user.email` in effect for the session's repository is still recorded per session as a secondary, non-identifying join signal for pull-request authorship, because the server's GitHub email mapping already keys on it.
 
 The shape is the Tailscale auth-key model: the circulated secret is short-lived and can only enroll, and the per-laptop secret is minted, not copied, so a leaked enrollment token exposes nothing already enrolled and a lost laptop is revoked alone.
 
@@ -66,6 +67,7 @@ Under the later WorkOS path the same enrollment response is produced from a veri
 ## Risks
 
 - **An engineer confirms the wrong email.** Sessions resolve to no contributor or the wrong one. Mitigated by the server surfacing devices whose email matches no known contributor to an operator.
+- **The login skill's Bash call has no plugin data directory.** Claude Code substitutes `${CLAUDE_PLUGIN_DATA}` into hook commands but not into a skill's Bash command, so the plugin's launcher falls back to `~/.claude/plugins/data/neo-tax-neo-tax` (under `CLAUDE_CONFIG_DIR` when set), the directory Claude Code uses for `neo-tax@neo-tax`. If Claude Code changes that layout, login stores the key where hooks do not look. Mitigated by the install smoke test.
 - **The plugin data directory is synced or backed up off the machine.** The device key leaves the laptop. Accepted for v0.1; revisit OS keychain storage for the v1.0 rollout kit.
 
 - **The enrollment token passes through the harness conversation.** In Claude Code the engineer pastes the token into the conversation, so it reaches the model vendor and the local transcript. Accepted: the token is short-lived and can only enroll, which is the reason it is separate from the device key; an engineer can also run the login command in a terminal to keep it out of the conversation.
