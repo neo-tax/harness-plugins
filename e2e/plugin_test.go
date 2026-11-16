@@ -84,6 +84,24 @@ func TestSkillsDelegateToAgent(t *testing.T) {
 	}
 }
 
+// The login command waits up to five minutes for the browser form, and the
+// model can relay the form's address only while it runs, so the skill runs
+// it in the background; the model must never relay the token.
+// @spec: device-enrollment#token-never-in-conversation
+// @spec: device-enrollment#browser-wait-bounded
+func TestLoginSkillWaitsForTheFormAndNeverAsksForTheToken(t *testing.T) {
+	b, err := os.ReadFile(pluginDir + "/skills/login/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, want := range []string{"run_in_background", "Never ask the engineer for the enrollment token"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("login skill lacks %q", want)
+		}
+	}
+}
+
 func TestManifestsNameThePluginNeoTax(t *testing.T) {
 	var p struct{ Name, Version string }
 	b, _ := os.ReadFile(pluginDir + "/.claude-plugin/plugin.json")

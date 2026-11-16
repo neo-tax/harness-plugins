@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -19,14 +21,11 @@ func TestLoginCommand(t *testing.T) {
 	defer srv.Close()
 	dir := t.TempDir()
 	var out, errOut bytes.Buffer
-	if code := run([]string{"login", "--data-dir", dir, "--server", srv.URL}, strings.NewReader(""), &out, &errOut); code != 3 {
-		t.Fatalf("missing input: exit %d", code)
-	}
-	if !strings.Contains(out.String(), "--token") {
-		t.Fatalf("no instructions: %s", out.String())
+	if code := run([]string{"login", "--data-dir", dir, "--server", srv.URL, "--token-stdin", "--email", "e@example.com"}, strings.NewReader("t\n"), &out, &errOut); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
 	}
 	out.Reset()
-	if code := run([]string{"login", "--data-dir", dir, "--server", srv.URL, "--token", "t", "--email", "e@example.com"}, strings.NewReader(""), &out, &errOut); code != 0 {
+	if code := run([]string{"login", "--data-dir", dir, "--server", srv.URL, "--token-stdin", "--email", "e@example.com"}, strings.NewReader("t\n"), &out, &errOut); code != 0 {
 		t.Fatalf("exit %d: %s", code, errOut.String())
 	}
 	if _, err := enroll.Load(dir); err != nil {
@@ -41,9 +40,61 @@ func TestLoginCommand(t *testing.T) {
 	}
 }
 
+// Run by a harness, with no terminal, login collects the token in the
+// browser form and names the terminal command as the alternative.
+// @spec: device-enrollment#interactive-enrollment
+// @spec: device-enrollment#browser-terminal-alternative
+func TestLoginWithoutTerminalUsesTheBrowserForm(t *testing.T) {
+	t.Setenv("NEO_TAX_NO_BROWSER", "")
+	startBackfill = func(string, bool) error { return nil }
+	srv := httptest.NewServer(fakeingest.New(fakeingest.Options{}))
+	defer srv.Close()
+	dir := t.TempDir()
+	opened := make(chan string, 1)
+	openURL = func(u string) error { opened <- u; return nil }
+	defer func() { openURL = enroll.OpenBrowser }()
+	go func() {
+		u := <-opened
+		resp, err := http.PostForm(u, url.Values{"token": {"t"}, "email": {"other"}, "email_other": {"e@example.com"}})
+		if err == nil {
+			resp.Body.Close()
+		}
+	}()
+	var out, errOut bytes.Buffer
+	if code := run([]string{"login", "--data-dir", dir, "--server", srv.URL}, strings.NewReader("t\n"), &out, &errOut); code != 0 {
+		t.Fatalf("exit %d: %s%s", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), " login --data-dir ") || !strings.Contains(out.String(), " --server "+srv.URL) {
+		t.Errorf("no terminal command for this server:\n%s", out.String())
+	}
+	if d, err := enroll.Load(dir); err != nil || d.Email != "e@example.com" {
+		t.Fatalf("%+v %v", d, err)
+	}
+}
+
 func TestVersion(t *testing.T) {
 	var out bytes.Buffer
 	if run([]string{"version"}, nil, &out, &out) != 0 || strings.TrimSpace(out.String()) != Version {
 		t.Fatal(out.String())
+	}
+}
+
+// The enrollment token is never an argument, where ps and shell history
+// would keep it: --token does not exist, and --token-stdin reads it from a
+// pipe.
+// @spec: device-enrollment#token-never-on-argv
+func TestLoginTakesTheTokenOnlyFromStdin(t *testing.T) {
+	srv := httptest.NewServer(fakeingest.New(fakeingest.Options{}))
+	defer srv.Close()
+	dir := t.TempDir()
+	var out, errOut bytes.Buffer
+	if code := run([]string{"login", "--data-dir", dir, "--server", srv.URL, "--token", "t", "--email", "e@example.com"}, strings.NewReader(""), &out, &errOut); code != 2 {
+		t.Fatalf("--token accepted: exit %d", code)
+	}
+	if code := run([]string{"login", "--data-dir", dir, "--server", srv.URL, "--token-stdin", "--email", "e@example.com"}, strings.NewReader("\n"), &out, &errOut); code != 2 {
+		t.Fatalf("empty piped token: exit %d", code)
+	}
+	if _, err := enroll.Load(dir); err == nil {
+		t.Fatal("enrolled without a token")
 	}
 }

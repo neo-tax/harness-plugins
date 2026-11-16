@@ -83,7 +83,7 @@ if [ -z "$launcher" ] && [ -z "$tag" ]; then
   launcher="$market/plugins/claude-code/bin/neo-tax-agent"
 fi
 [ -n "$launcher" ] || fail "the installed plugin has no bin/neo-tax-agent"
-"$launcher" login --server "http://127.0.0.1:$port" --token smoke --email smoke@example.com
+echo smoke | "$launcher" login --server "http://127.0.0.1:$port" --token-stdin --email smoke@example.com
 data="$CLAUDE_CONFIG_DIR/plugins/data/neo-tax-neo-tax"
 if [ -n "$tag" ]; then
   # The launcher exits 0 when a download fails, so a missing binary would

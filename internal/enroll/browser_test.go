@@ -1,0 +1,528 @@
+package enroll_test
+
+import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/neo-tax/harness-plugins/internal/enroll"
+)
+
+// browserLogin runs Login with no terminal and the browser form, and returns
+// the form's address once Login has opened it, and Login's result.
+func (f *fixture) browserLogin(t *testing.T, wait time.Duration, open func(string) error) (string, <-chan error) {
+	t.Helper()
+	o := f.opts("", "")
+	o.Browser = true
+	o.Wait = wait
+	o.TerminalCommand = "/path/to/neo-tax-agent login"
+	addr := make(chan string, 1)
+	o.OpenURL = func(u string) error {
+		addr <- u
+		if open != nil {
+			return open(u)
+		}
+		return nil
+	}
+	done := make(chan error, 1)
+	go func() { done <- enroll.Login(context.Background(), o) }()
+	select {
+	case u := <-addr:
+		return u, done
+	case err := <-done:
+		t.Fatalf("Login returned before opening the form: %v\n%s", err, f.out.String())
+	case <-time.After(5 * time.Second):
+		t.Fatal("form never opened")
+	}
+	return "", nil
+}
+
+func get(t *testing.T, u string) (int, string) {
+	t.Helper()
+	resp, err := http.Get(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
+func submit(t *testing.T, u string, fields url.Values) (int, string) {
+	t.Helper()
+	resp, err := http.PostForm(u, fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
+func wait(t *testing.T, done <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(10 * time.Second):
+		t.Fatal("Login did not return")
+		return nil
+	}
+}
+
+// With no terminal, the agent collects the token and email in a local
+// browser form and enrolls when it is submitted; the conversation sees only
+// the terminal alternative and the result, not the form's address.
+// @spec: device-enrollment#interactive-enrollment
+// @spec: device-enrollment#token-never-in-conversation
+// @spec: device-enrollment#browser-terminal-alternative
+// @spec: device-enrollment#email-candidates
+// @spec: device-enrollment#form-address-printed-only-as-fallback
+func TestBrowserFormEnrolls(t *testing.T) {
+	f := newFixture(t)
+	u, done := f.browserLogin(t, time.Minute, nil)
+	parsed, _ := url.Parse(u)
+	if parsed.Hostname() != "127.0.0.1" {
+		t.Fatalf("form served at %s", u)
+	}
+	code, page := get(t, u)
+	if code != http.StatusOK {
+		t.Fatalf("GET %d", code)
+	}
+	for _, want := range []string{"Engineer@Example.com", "account@example.com", `type="password"`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("form lacks %q", want)
+		}
+	}
+	code, page = submit(t, u, url.Values{"token": {"et_good"}, "email": {"account@example.com"}})
+	if code != http.StatusOK || !strings.Contains(page, "Enrolled") {
+		t.Fatalf("submit %d: %s", code, page)
+	}
+	if err := wait(t, done); err != nil {
+		t.Fatal(err)
+	}
+	if f.last.EnrollmentToken != "et_good" || f.last.Email != "account@example.com" {
+		t.Fatalf("enrolled with %+v", f.last)
+	}
+	if _, err := enroll.Load(f.dir); err != nil {
+		t.Fatal(err)
+	}
+	out := f.out.String()
+	for _, want := range []string{"/path/to/neo-tax-agent login", "Enrolled this device as account@example.com."} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "et_good") {
+		t.Errorf("output carries the token:\n%s", out)
+	}
+	if strings.Contains(out, parsed.Path) {
+		t.Errorf("output carries the form's secret address though the browser opened:\n%s", out)
+	}
+}
+
+// A typed email is used when the engineer picks "other".
+// @spec: device-enrollment#email-candidates
+func TestBrowserFormTypedEmail(t *testing.T) {
+	f := newFixture(t)
+	u, done := f.browserLogin(t, time.Minute, nil)
+	submit(t, u, url.Values{"token": {"et_good"}, "email": {"other"}, "email_other": {" Typed@Example.com "}})
+	if err := wait(t, done); err != nil {
+		t.Fatal(err)
+	}
+	if f.last.Email != "Typed@Example.com" {
+		t.Fatalf("email %q", f.last.Email)
+	}
+}
+
+// The first candidate is chosen by default, and a typed email wins even when
+// its radio button was not clicked (the page runs no script).
+// @spec: device-enrollment#email-candidates
+func TestBrowserFormDefaults(t *testing.T) {
+	f := newFixture(t)
+	u, done := f.browserLogin(t, time.Minute, nil)
+	_, page := get(t, u)
+	if !strings.Contains(page, `value="Engineer@Example.com" checked`) {
+		t.Errorf("first candidate not chosen by default:\n%s", page)
+	}
+	// What a browser sends when the engineer types another email but leaves
+	// the default candidate selected.
+	submit(t, u, url.Values{"token": {"et_good"}, "email": {"Engineer@Example.com"}, "email_other": {"typed@example.com"}})
+	if err := wait(t, done); err != nil {
+		t.Fatal(err)
+	}
+	if f.last.Email != "typed@example.com" {
+		t.Fatalf("email %q", f.last.Email)
+	}
+}
+
+// With no email found on the machine, the form asks for one plainly, with no
+// choices to pick from.
+// @spec: device-enrollment#email-candidates
+func TestBrowserFormWithoutCandidates(t *testing.T) {
+	f := newFixture(t)
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	o := f.opts("", "")
+	o.AccountEmail = nil
+	o.Browser, o.Wait = true, time.Minute
+	addr := make(chan string, 1)
+	o.OpenURL = func(u string) error { addr <- u; return nil }
+	done := make(chan error, 1)
+	go func() { done <- enroll.Login(context.Background(), o) }()
+	u := <-addr
+	_, page := get(t, u)
+	if strings.Contains(page, `type="radio"`) || strings.Contains(page, "Another email") {
+		t.Errorf("choices offered with no candidates:\n%s", page)
+	}
+	if !strings.Contains(page, `name="email_other" type="email" required`) {
+		t.Errorf("no required email field:\n%s", page)
+	}
+	submit(t, u, url.Values{"token": {"et_good"}, "email_other": {"solo@example.com"}})
+	if err := wait(t, done); err != nil {
+		t.Fatal(err)
+	}
+	if f.last.Email != "solo@example.com" {
+		t.Fatalf("email %q", f.last.Email)
+	}
+}
+
+// A rejected token or an invalid email is shown in the form, which stays
+// open for another try.
+// @spec: device-enrollment#browser-form-retries
+func TestBrowserFormRetries(t *testing.T) {
+	f := newFixture(t)
+	u, done := f.browserLogin(t, time.Minute, nil)
+	code, page := submit(t, u, url.Values{"token": {"et_expired"}, "email": {"account@example.com"}})
+	if code != http.StatusOK || !strings.Contains(page, "rejected") || strings.Contains(page, "et_expired") {
+		t.Fatalf("rejected token: %d %s", code, page)
+	}
+	code, page = submit(t, u, url.Values{"token": {"et_good"}, "email": {"other"}, "email_other": {"not an email"}})
+	if code != http.StatusOK || !strings.Contains(page, "not an email address") {
+		t.Fatalf("bad email: %d %s", code, page)
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("Login returned after a failed try: %v", err)
+	default:
+	}
+	submit(t, u, url.Values{"token": {"et_good"}, "email": {"account@example.com"}})
+	if err := wait(t, done); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// @spec: device-enrollment#browser-form-loopback
+func TestBrowserFormRefusesOtherHostsAndPaths(t *testing.T) {
+	f := newFixture(t)
+	u, done := f.browserLogin(t, time.Minute, nil)
+	parsed, _ := url.Parse(u)
+
+	if code, _ := get(t, parsed.Scheme+"://"+parsed.Host+"/"); code != http.StatusNotFound {
+		t.Errorf("root: %d", code)
+	}
+	if code, _ := get(t, parsed.Scheme+"://"+parsed.Host+"/not-the-secret"); code != http.StatusNotFound {
+		t.Errorf("wrong secret: %d", code)
+	}
+	// A DNS-rebinding page reaches the port under its own host name.
+	req, _ := http.NewRequest(http.MethodPost, u, strings.NewReader("token=et_good&email=account%40example.com"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Host = "attacker.example:" + parsed.Port()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("foreign Host: %d", resp.StatusCode)
+	}
+	if f.last.EnrollmentToken != "" {
+		t.Fatal("enrolled through a refused request")
+	}
+
+	submit(t, u, url.Values{"token": {"et_good"}, "email": {"account@example.com"}})
+	if err := wait(t, done); err != nil {
+		t.Fatal(err)
+	}
+	// Once enrolled, the form is gone.
+	if _, err := http.Get(u); err == nil {
+		t.Error("form still served after enrollment")
+	}
+}
+
+// @spec: device-enrollment#browser-wait-bounded
+func TestBrowserWaitBounded(t *testing.T) {
+	f := newFixture(t)
+	u, done := f.browserLogin(t, 300*time.Millisecond, nil)
+	err := wait(t, done)
+	if !errors.Is(err, enroll.ErrLoginNotCompleted) {
+		t.Fatalf("err %v", err)
+	}
+	if _, err := http.Get(u); err == nil {
+		t.Error("form still served after the wait")
+	}
+	if _, err := enroll.Load(f.dir); !errors.Is(err, enroll.ErrNotEnrolled) {
+		t.Errorf("enrolled: %v", err)
+	}
+}
+
+// When no browser can be opened, the address and the terminal command are
+// printed, and the form still works if the engineer opens it.
+// @spec: device-enrollment#browser-terminal-alternative
+// @spec: device-enrollment#form-address-printed-only-as-fallback
+func TestBrowserFormWorksWhenNoBrowserOpens(t *testing.T) {
+	f := newFixture(t)
+	u, done := f.browserLogin(t, time.Minute, func(string) error { return errors.New("no display") })
+	submit(t, u, url.Values{"token": {"et_good"}, "email": {"account@example.com"}})
+	if err := wait(t, done); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{u, "/path/to/neo-tax-agent login"} {
+		if !strings.Contains(f.out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, f.out.String())
+		}
+	}
+}
+
+// submitAsync posts the form from another goroutine and delivers the page.
+func submitAsync(u string, fields url.Values) <-chan string {
+	page := make(chan string, 1)
+	go func() {
+		resp, err := http.PostForm(u, fields)
+		if err != nil {
+			page <- err.Error()
+			return
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		page <- string(b)
+	}()
+	return page
+}
+
+// slowEnroll makes the fixture's enrollment endpoint answer only after d.
+func (f *fixture) slowEnroll(t *testing.T, d time.Duration) {
+	t.Helper()
+	inner := f.srv.Config.Handler
+	f.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/enroll" {
+			time.Sleep(d)
+		}
+		inner.ServeHTTP(w, r)
+	})
+}
+
+// A submit still enrolling when the wait ends is reported as the success
+// it is, not as a login that was not completed.
+// @spec: device-enrollment#browser-wait-bounded
+func TestBrowserWaitEndsDuringASuccessfulSubmit(t *testing.T) {
+	f := newFixture(t)
+	f.slowEnroll(t, 800*time.Millisecond)
+	u, done := f.browserLogin(t, 300*time.Millisecond, nil)
+	submitAsync(u, url.Values{"token": {"et_good"}, "email": {"account@example.com"}})
+	if err := wait(t, done); err != nil {
+		t.Fatalf("err %v\n%s", err, f.out.String())
+	}
+	if _, err := enroll.Load(f.dir); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(f.out.String(), "not completed") {
+		t.Errorf("reported failure:\n%s", f.out.String())
+	}
+}
+
+// A submit that fails as the wait ends leaves the login not completed, and
+// the form then says it has expired rather than offering another try.
+// @spec: device-enrollment#browser-wait-bounded
+func TestBrowserWaitEndsDuringAFailedSubmit(t *testing.T) {
+	f := newFixture(t)
+	f.slowEnroll(t, 800*time.Millisecond)
+	u, done := f.browserLogin(t, 300*time.Millisecond, nil)
+	page := submitAsync(u, url.Values{"token": {"et_expired"}, "email": {"account@example.com"}})
+	if err := wait(t, done); !errors.Is(err, enroll.ErrLoginNotCompleted) {
+		t.Fatalf("err %v", err)
+	}
+	if p := <-page; !strings.Contains(p, "Login expired") || strings.Contains(p, `type="password"`) {
+		t.Errorf("failed submit as the wait ended not shown as expired:\n%s", p)
+	}
+}
+
+// A token given on the command line without an email is used; the form
+// asks only for the email.
+// @spec: device-enrollment#interactive-enrollment
+func TestBrowserFormUsesAGivenToken(t *testing.T) {
+	f := newFixture(t)
+	o := f.opts("et_good", "")
+	o.Browser, o.Wait = true, time.Minute
+	addr := make(chan string, 1)
+	o.OpenURL = func(u string) error { addr <- u; return nil }
+	done := make(chan error, 1)
+	go func() { done <- enroll.Login(context.Background(), o) }()
+	u := <-addr
+	if _, page := get(t, u); strings.Contains(page, `type="password"`) {
+		t.Errorf("token asked for again:\n%s", page)
+	}
+	submit(t, u, url.Values{"email": {"account@example.com"}})
+	if err := wait(t, done); err != nil {
+		t.Fatal(err)
+	}
+	if f.last.EnrollmentToken != "et_good" {
+		t.Fatalf("token %q", f.last.EnrollmentToken)
+	}
+}
+
+// A given token the server rejects is dropped, and the form asks for one.
+// @spec: device-enrollment#browser-form-retries
+func TestBrowserFormAsksForATokenWhenTheGivenOneIsRejected(t *testing.T) {
+	f := newFixture(t)
+	o := f.opts("et_expired", "")
+	o.Browser, o.Wait = true, time.Minute
+	addr := make(chan string, 1)
+	o.OpenURL = func(u string) error { addr <- u; return nil }
+	done := make(chan error, 1)
+	go func() { done <- enroll.Login(context.Background(), o) }()
+	u := <-addr
+	_, page := submit(t, u, url.Values{"email": {"account@example.com"}})
+	if !strings.Contains(page, "rejected") || !strings.Contains(page, `type="password"`) {
+		t.Fatalf("rejected given token: no way to enter another:\n%s", page)
+	}
+	submit(t, u, url.Values{"token": {"et_good"}, "email": {"account@example.com"}})
+	if err := wait(t, done); err != nil {
+		t.Fatal(err)
+	}
+	if f.last.EnrollmentToken != "et_good" {
+		t.Fatalf("token %q", f.last.EnrollmentToken)
+	}
+}
+
+// The terminal alternative is in the output before any result, even when
+// the form is submitted while the browser is still opening; and the form
+// loads without waiting for the browser launcher to return.
+// @spec: device-enrollment#browser-terminal-alternative
+func TestBrowserFormAddressPrintedFirst(t *testing.T) {
+	f := newFixture(t)
+	var loaded time.Duration
+	openErr := make(chan error, 1)
+	_, done := f.browserLogin(t, time.Minute, func(u string) error {
+		// This runs on Login's goroutine, so it hands errors to the test
+		// goroutine rather than failing the test from here.
+		start := time.Now()
+		resp, err := http.Get(u)
+		if err != nil {
+			openErr <- err
+			return nil
+		}
+		resp.Body.Close()
+		loaded = time.Since(start)
+		submitAsync(u, url.Values{"token": {"et_good"}, "email": {"account@example.com"}})
+		time.Sleep(300 * time.Millisecond)
+		return nil
+	})
+	select {
+	case err := <-openErr:
+		t.Fatalf("loading the form: %v", err)
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Login did not return")
+	}
+	out := f.out.String()
+	if a, r := strings.Index(out, "run this in a terminal"), strings.Index(out, "Enrolled this device as"); a < 0 || r < 0 || a > r {
+		t.Fatalf("terminal alternative after the result:\n%s", out)
+	}
+	if loaded > time.Second {
+		t.Errorf("form took %s to load while the browser opened", loaded)
+	}
+}
+
+// The form's font is served from the form's own secret address, so the page
+// loads nothing from elsewhere.
+// @spec: device-enrollment#browser-form-loopback
+func TestBrowserFormServesItsFont(t *testing.T) {
+	f := newFixture(t)
+	u, done := f.browserLogin(t, time.Minute, nil)
+	_, page := get(t, u)
+	if strings.Contains(page, "https://") {
+		t.Errorf("page loads from elsewhere:\n%s", page)
+	}
+	resp, err := http.Get(u + "/inter.woff2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	// Cacheable: the result page renders after the form stops serving.
+	if !strings.Contains(resp.Header.Get("Cache-Control"), "max-age") {
+		t.Errorf("font not cacheable: %q", resp.Header.Get("Cache-Control"))
+	}
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "font/woff2" || !strings.HasPrefix(string(b), "wOF2") {
+		t.Errorf("font: %d %s %d bytes", resp.StatusCode, resp.Header.Get("Content-Type"), len(b))
+	}
+	parsed, _ := url.Parse(u)
+	if code, _ := get(t, parsed.Scheme+"://"+parsed.Host+"/inter.woff2"); code != http.StatusNotFound {
+		t.Errorf("font outside the secret path: %d", code)
+	}
+	submit(t, u, url.Values{"token": {"et_good"}, "email": {"account@example.com"}})
+	wait(t, done)
+}
+
+// Errors read as sentences in the form.
+// @spec: device-enrollment#browser-form-retries
+func TestBrowserFormErrorsAreSentences(t *testing.T) {
+	f := newFixture(t)
+	u, done := f.browserLogin(t, time.Minute, nil)
+	_, page := submit(t, u, url.Values{"token": {"et_expired"}, "email": {"account@example.com"}})
+	if !strings.Contains(page, "The enrollment token was rejected;") || !strings.Contains(page, "for a new one.<") {
+		t.Errorf("error not a sentence:\n%s", page)
+	}
+	submit(t, u, url.Values{"token": {"et_good"}, "email": {"account@example.com"}})
+	wait(t, done)
+}
+
+// A browser that drops its submit while the exchange is in flight does not
+// cancel it: the server may already have spent the token and created the
+// device, so the agent still stores the key it is sent.
+// @spec: device-enrollment#browser-exchange-outlives-request
+func TestBrowserSubmitDroppedMidExchangeStillEnrolls(t *testing.T) {
+	f := newFixture(t)
+	f.enrollGate = make(chan chan struct{})
+	u, done := f.browserLogin(t, time.Minute, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, u,
+		strings.NewReader(url.Values{"token": {"et_good"}, "email": {"account@example.com"}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	posted := make(chan error, 1)
+	go func() {
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			resp.Body.Close()
+		}
+		posted <- err
+	}()
+	var release chan struct{}
+	select {
+	case release = <-f.enrollGate:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the exchange never reached the server")
+	}
+	cancel()
+	if err := <-posted; err == nil {
+		t.Fatal("the browser's submit was not dropped")
+	}
+	// Let the agent's side notice the dropped connection before the server
+	// answers.
+	time.Sleep(100 * time.Millisecond)
+	close(release)
+	if err := wait(t, done); err != nil {
+		t.Fatalf("Login: %v\n%s", err, f.out.String())
+	}
+	if _, err := enroll.Load(f.dir); err != nil {
+		t.Fatalf("no key stored after the browser dropped its submit: %v", err)
+	}
+}
