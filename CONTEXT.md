@@ -16,9 +16,11 @@ The code that runs on an engineer's machine to observe AI coding sessions and re
 
 **Session**: One conversation an engineer has with a harness, identified by the harness's own session id.
 
-**Session event**: A normalized record the agent emits about a session (opened, turn, PR opened, closed), carrying only the device id and non-personal session metadata. _Avoid_: event, usage record, telemetry
+**Session event**: A normalized record the agent emits about a session (opened, turn, PR linked, closed), carrying only the device id and non-personal session metadata. _Avoid_: event, usage record, telemetry
 
 **Turn**: One API call's assistant response within a session; the unit at which usage is reported. A session event identifies it by the harness's message id, and the server joins it with telemetry on its call ids. A turn produced by a subagent belongs to the parent session and carries the subagent's id.
+
+**PR link**: A pull request a session touched, as the harness records it: opened, pushed to, or viewed from the session. A session links each pull request once, and one pull request can be linked to many sessions. _Avoid_: PR opened, PR event
 
 **Subagent**: A child agent a harness spawns inside a session, with its own transcript and message ids but no session of its own. _Avoid_: sidechain, child session, sub-session _Avoid_: request, response, step
 
@@ -48,7 +50,7 @@ The code that runs on an engineer's machine to observe AI coding sessions and re
 
 **Wire contract**: The JSON Schema definitions of every request and response between the agent and Neo.Tax, owned by this repo and versioned by `contract_version`. _Avoid_: API, protocol, payload format
 
-**Cursor**: The agent's record, per transcript, of how far it has read and the last message it emitted, so each hook reads only the new tail.
+**Cursor**: The agent's record, per transcript, of how far it has read and the last message it emitted, so each hook reads only the new tail; a session's main-transcript cursor also records which PR links it has sent.
 
 **Dead letter**: A session event the server rejected for schema reasons, set aside on disk with the server's reason instead of being retried.
 

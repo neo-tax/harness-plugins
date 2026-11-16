@@ -34,7 +34,7 @@ func typedEvents() []any {
 		contract.NewTurn(testEnvelope, contract.TurnFields{MessageID: "msg_2", SubagentID: ptr("a1"), Timestamp: ts, Model: ptr("claude-opus-5-5"), Usage: contract.Usage{
 			Input: ptr(int64(1)), Output: ptr(int64(2)), CacheWrite5m: ptr(int64(0)), CacheWrite1h: ptr(int64(3)), CacheRead: ptr(int64(4)), ServiceTier: ptr("standard"), Speed: ptr("fast"), Source: contract.UsageSourceTranscript,
 		}}),
-		contract.NewPROpened(testEnvelope, contract.PROpenedFields{Repo: r, Number: 7, Timestamp: ts}),
+		contract.NewPRLinked(testEnvelope, contract.PRLinkedFields{Repo: r, Number: 7, FirstSeenAt: ts}),
 		contract.NewClosed(testEnvelope, contract.ClosedFields{EndedAt: ts, Reason: ptr("other"), DroppedEvents: 3}),
 		contract.NewClosed(testEnvelope, contract.ClosedFields{EndedAt: ts, Reason: ptr("other"), SideUsage: []contract.SideUsage{
 			{Model: "claude-opus-5-5", Input: 1169, Output: 14},
@@ -58,7 +58,7 @@ func TestTypedEventsValidateAgainstSchema(t *testing.T) {
 // @spec: session-event-wire-contract#schema-is-source-of-truth
 // @spec: session-event-wire-contract#opened-fields
 // @spec: session-event-wire-contract#turn-fields
-// @spec: session-event-wire-contract#pr-opened-fields
+// @spec: session-event-wire-contract#pr-linked-fields
 // @spec: session-event-wire-contract#closed-fields
 func TestTypedFieldsMatchSchemaProperties(t *testing.T) {
 	for kind, fields := range contract.SchemaFields() {
@@ -82,7 +82,7 @@ func TestTypedFieldsMatchSchemaProperties(t *testing.T) {
 
 func TestSchemaFieldsCoverEveryKind(t *testing.T) {
 	got := keys(anyMap(contract.SchemaFields()))
-	want := []string{"session.closed", "session.opened", "session.pr_opened", "session.turn"}
+	want := []string{"session.closed", "session.opened", "session.pr_linked", "session.turn"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("kinds %v", got)
 	}

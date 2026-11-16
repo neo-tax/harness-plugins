@@ -5,7 +5,7 @@ owner:
   - Firas Abuzaid
 created: 2026-10-24
 updated: 2026-11-14
-version: 9
+version: 10
 affects:
   - internal/adapter/claudecode/*.go
   - internal/cursor/*.go
@@ -33,7 +33,8 @@ Governs how the Claude Code adapter turns hook payloads and on-disk transcripts 
 - `message-id-is-provider-id`(tested): A turn's `message_id` is the provider's own id for the response as the transcript records it (for Anthropic, `msg_…`), unchanged, because Neo.Tax joins another source's record of the same API call to the turn on it.
 - `subagent-transcripts-scanned`(tested): On every hook that reads turns, the adapter also scans each subagent transcript under the session's subagents directory from its own cursor and emits those messages as turns of the parent session with the subagent's id.
 - `subagent-usage-counted`(tested): Subagent turns carry their own usage; they are never folded into a main-thread turn.
-- `pr-link-lines`(tested): A transcript line recording a pull request opened from the session produces one `session.pr_opened` event with the repository parsed from the recorded repository name and the recorded number.
+- `pr-link-lines`(tested): A transcript line recording a pull request link produces a `session.pr_linked` event with the repository parsed from the recorded repository name, the recorded number, and the line's time as `first_seen_at`.
+- `pr-link-once-per-session`(tested): The adapter sends one `session.pr_linked` per pull request per session, across hook runs and across the session's main and subagent transcripts, with the earliest time a copy of the link line was seen in that read. It records the links it has sent on the main transcript's cursor as short hashes, so the cursor file does not name repositories, and keeps them when a rewritten transcript is read again.
 - `closed-on-session-end`(tested): `SessionEnd` produces one `session.closed` event with the harness's end reason.
 - `session-totals-from-cost-state`(tested): The session's totals are read from the main transcript's `cost-state` lines: per model, the latest line of each process's tally (lines sharing a `startTime`), summed across tallies.
 - `side-usage-is-totals-minus-turns`(tested): `side_usage` is, per model and per count, the session's totals less the usage of every turn of the session (main thread and subagents, each message counted once), clamped at zero, with models whose counts are all zero left out.

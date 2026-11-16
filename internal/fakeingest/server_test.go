@@ -282,14 +282,15 @@ func TestNonObjectEventRejectedPerEvent(t *testing.T) {
 	}
 }
 
-// Two pull requests opened from one session are two events.
-// @spec: session-event-wire-contract#idempotency-key
-func TestTwoPROpenedInOneSessionAreDistinct(t *testing.T) {
+// A session links each pull request once: a repeat within the session adds
+// nothing, and another pull request is another link.
+// @spec: session-event-wire-contract#pr-link-per-session
+func TestPRLinkedOncePerSession(t *testing.T) {
 	h := start(t, fakeingest.Options{})
 	er := h.enroll()
 	env := turn(er.DeviceID, "x").Envelope
-	pr := func(n int64) contract.PROpened {
-		return contract.NewPROpened(env, contract.PROpenedFields{Repo: &contract.Repo{Host: "github.com", Owner: "o", Name: "r"}, Number: n, Timestamp: env.SentAt})
+	pr := func(n int64) contract.PRLinked {
+		return contract.NewPRLinked(env, contract.PRLinkedFields{Repo: &contract.Repo{Host: "github.com", Owner: "o", Name: "r"}, Number: n, FirstSeenAt: env.SentAt})
 	}
 	_, ir, _ := h.ingest(er.DeviceKey, pr(42), pr(43), pr(42))
 	if ir.Accepted != 2 || ir.Duplicates != 1 {
@@ -314,8 +315,8 @@ func TestResumedSessionCloseIsKept(t *testing.T) {
 	}
 }
 
-// A fork re-sends its parent's turns and pull requests under its own session
-// id; they add nothing.
+// A fork re-sends its parent's turns under its own session id; they add
+// nothing. A pull request linked from both sessions is linked to each.
 // @spec: session-event-wire-contract#idempotency-key
 func TestForkCopiesAreDuplicates(t *testing.T) {
 	var dups bytes.Buffer
@@ -326,14 +327,14 @@ func TestForkCopiesAreDuplicates(t *testing.T) {
 	fork.SessionID = "s-fork"
 	own := turn(er.DeviceID, "msg_2")
 	own.SessionID = "s-fork"
-	pr := func(session string) contract.PROpened {
+	pr := func(session string) contract.PRLinked {
 		env := parent.Envelope
 		env.SessionID = session
-		return contract.NewPROpened(env, contract.PROpenedFields{Repo: &contract.Repo{Host: "github.com", Owner: "o", Name: "r"}, Number: 7, Timestamp: env.SentAt})
+		return contract.NewPRLinked(env, contract.PRLinkedFields{Repo: &contract.Repo{Host: "github.com", Owner: "o", Name: "r"}, Number: 7, FirstSeenAt: env.SentAt})
 	}
 	h.ingest(er.DeviceKey, parent, pr("s-1"))
 	_, ir, body := h.ingest(er.DeviceKey, fork, pr("s-fork"), own)
-	if ir.Accepted != 1 || ir.Duplicates != 2 {
+	if ir.Accepted != 2 || ir.Duplicates != 1 {
 		t.Fatalf("%+v %s", ir, body)
 	}
 	for _, ev := range h.recorded() {
@@ -343,7 +344,7 @@ func TestForkCopiesAreDuplicates(t *testing.T) {
 	}
 	// The dropped copies are recorded as sent, under the fork's session.
 	lines := bytes.Split(bytes.TrimSpace(dups.Bytes()), []byte("\n"))
-	if len(lines) != 2 {
+	if len(lines) != 1 {
 		t.Fatalf("recorded %d duplicates: %s", len(lines), dups.Bytes())
 	}
 	for _, l := range lines {

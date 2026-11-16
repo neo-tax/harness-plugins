@@ -68,7 +68,7 @@ func TestBackfillEmitsEveryTranscriptNewestFirst(t *testing.T) {
 	if strings.Join(sessions, ",") != "22222222-2222-4222-8222-222222222222,11111111-1111-4111-8111-111111111111" {
 		t.Fatalf("opened order %v", sessions)
 	}
-	if k := strings.Join(kinds(got), ","); k != "session.opened,session.turn,session.opened,session.turn,session.turn,session.pr_opened,session.turn,session.turn" {
+	if k := strings.Join(kinds(got), ","); k != "session.opened,session.turn,session.opened,session.turn,session.turn,session.pr_linked,session.turn,session.turn" {
 		t.Fatalf("recorded %s", k)
 	}
 	newOpened := got[0]
@@ -305,7 +305,7 @@ func TestBackfillResumesAfterPause(t *testing.T) {
 			t.Fatal("resumed run re-read a transcript the paused run queued")
 		}
 	}
-	if c := cursor.Open(h.data).Get(filepath.Join(proj, "00000000-0000-4000-8000-000000000001.jsonl")); c != cursorBefore {
+	if c := cursor.Open(h.data).Get(filepath.Join(proj, "00000000-0000-4000-8000-000000000001.jsonl")); !reflect.DeepEqual(c, cursorBefore) {
 		t.Errorf("queued transcript's cursor changed: %+v -> %+v", cursorBefore, c)
 	}
 	if c := cursor.Open(h.data).Get(filepath.Join(proj, fmt.Sprintf("00000000-0000-4000-8000-%012d.jsonl", n-1))); c.Offset == 0 {
@@ -520,7 +520,7 @@ func TestBackfillClosesSessionsThatEndedCleanly(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := h.recorded()
-	if k := strings.Join(kinds(got), ","); k != "session.opened,session.turn,session.opened,session.turn,session.turn,session.pr_opened,session.turn,session.turn,session.closed" {
+	if k := strings.Join(kinds(got), ","); k != "session.opened,session.turn,session.opened,session.turn,session.turn,session.pr_linked,session.turn,session.turn,session.closed" {
 		t.Fatalf("recorded %s", k)
 	}
 	c := got[len(got)-1]

@@ -30,6 +30,10 @@ type Cursor struct {
 	// transcript's lines were copied from the parent session, so reads skip
 	// the turns and pull requests timestamped before it.
 	Since time.Time `json:"since,omitzero"`
+	// PRLinks, on a session's main transcript, holds a short hash of each
+	// pull request the session has already reported a link to, so a link
+	// is sent once per session however often the transcript repeats it.
+	PRLinks []string `json:"pr_links,omitempty"`
 }
 
 // Store is the cursor file of one plugin data directory.

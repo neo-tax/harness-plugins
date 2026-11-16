@@ -80,10 +80,10 @@ var byKind = map[string][]Field{
 			{"source", "Where the counts came from: payload, transcript, or unknown.", nil, false},
 		}, false},
 	},
-	contract.KindPROpened: {
+	contract.KindPRLinked: {
 		repo,
 		{"number", "Pull request number.", nil, false},
-		{"timestamp", "When the pull request was recorded as opened.", nil, false},
+		{"first_seen_at", "When the session's transcript first recorded the link to the pull request.", nil, false},
 	},
 	contract.KindClosed: {
 		{"ended_at", "When the session ended.", nil, false},

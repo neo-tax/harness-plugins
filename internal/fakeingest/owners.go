@@ -9,7 +9,7 @@ import (
 	"github.com/neo-tax/harness-plugins/contract"
 )
 
-// owners decides which session a turn or pull request belongs to when more
+// owners decides which session a turn belongs to when more
 // than one session reports it, as a fork does with the turns it copied from
 // its parent. The owner is fixed by the sessions that reported the event,
 // not by the order they arrived in: a session that is not a fork, then the
@@ -37,7 +37,7 @@ func newOwners() owners {
 }
 
 func shared(ev map[string]any) bool {
-	return ev["event_kind"] == contract.KindTurn || ev["event_kind"] == contract.KindPROpened
+	return ev["event_kind"] == contract.KindTurn
 }
 
 func sessionKey(ev map[string]any) string {

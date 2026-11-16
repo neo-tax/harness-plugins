@@ -12,13 +12,13 @@
     "harness_version": { "type": ["string", "null"], "description": "Harness version recorded for the session." },
     "agent_version": { "type": "string", "minLength": 1, "description": "Version of neo-tax-agent that emitted the event." },
     "session_id": { "type": "string", "minLength": 1, "description": "The harness's own session id." },
-    "event_kind": { "enum": ["session.opened", "session.turn", "session.pr_opened", "session.closed"] },
+    "event_kind": { "enum": ["session.opened", "session.turn", "session.pr_linked", "session.closed"] },
     "sent_at": { "$ref": "#/$defs/timestamp", "description": "When the agent created the event." }
   },
   "oneOf": [
     { "$ref": "#/$defs/opened" },
     { "$ref": "#/$defs/turn" },
-    { "$ref": "#/$defs/pr_opened" },
+    { "$ref": "#/$defs/pr_linked" },
     { "$ref": "#/$defs/closed" }
   ],
   "unevaluatedProperties": false,
@@ -103,14 +103,18 @@
         "usage": { "$ref": "#/$defs/usage" }
       }
     },
-    "pr_opened": {
+    "pr_linked": {
       "type": "object",
-      "required": ["event_kind", "repo", "number", "timestamp"],
+      "description": "A pull request the session is linked to, sent once per session for each repo and number.",
+      "required": ["event_kind", "repo", "number", "first_seen_at"],
       "properties": {
-        "event_kind": { "const": "session.pr_opened" },
+        "event_kind": { "const": "session.pr_linked" },
         "repo": { "$ref": "#/$defs/repo" },
         "number": { "type": "integer", "minimum": 1 },
-        "timestamp": { "$ref": "#/$defs/timestamp" }
+        "first_seen_at": {
+          "description": "When the session's transcript first records the link; not when the pull request was opened.",
+          "$ref": "#/$defs/timestamp"
+        }
       }
     },
     "closed": {

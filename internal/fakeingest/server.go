@@ -200,19 +200,22 @@ func (s *Server) takeFault() string {
 	return s.fault
 }
 
-// idempotencyKey is the server's notion of "the same event". Turns and pull
-// requests are keyed without the session, so a fork's copies of its parent's
-// add nothing.
+// idempotencyKey is the server's notion of "the same event". Turns are
+// keyed without the session, so a fork's copies of its parent's add
+// nothing. A pull request link belongs to its session: the same pull
+// request linked from two sessions is two links, and a repeat within one
+// session adds nothing.
 //
 // @spec: session-event-wire-contract#idempotency-key
+// @spec: session-event-wire-contract#pr-link-per-session
 func idempotencyKey(ev map[string]any) string {
 	key := fmt.Sprint(ev["device_id"], "\x00", ev["event_kind"])
 	switch ev["event_kind"] {
 	case contract.KindTurn:
 		return key + "\x00" + fmt.Sprint(ev["message_id"])
-	case contract.KindPROpened:
+	case contract.KindPRLinked:
 		repo, _ := json.Marshal(ev["repo"])
-		return key + "\x00" + string(repo) + "\x00" + fmt.Sprint(ev["number"])
+		return key + "\x00" + fmt.Sprint(ev["session_id"]) + "\x00" + string(repo) + "\x00" + fmt.Sprint(ev["number"])
 	case contract.KindClosed:
 		// A resumed session closes again; its later close is kept.
 		return key + "\x00" + fmt.Sprint(ev["session_id"], "\x00", ev["ended_at"])

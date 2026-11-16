@@ -11,7 +11,7 @@ import (
 const (
 	KindOpened   = "session.opened"
 	KindTurn     = "session.turn"
-	KindPROpened = "session.pr_opened"
+	KindPRLinked = "session.pr_linked"
 	KindClosed   = "session.closed"
 )
 
@@ -84,10 +84,10 @@ type TurnFields struct {
 	Usage      Usage     `json:"usage"`
 }
 
-type PROpenedFields struct {
-	Repo      *Repo     `json:"repo"`
-	Number    int64     `json:"number"`
-	Timestamp time.Time `json:"timestamp"`
+type PRLinkedFields struct {
+	Repo        *Repo     `json:"repo"`
+	Number      int64     `json:"number"`
+	FirstSeenAt time.Time `json:"first_seen_at"`
 }
 
 type ClosedFields struct {
@@ -122,10 +122,10 @@ type Turn struct {
 	TurnFields
 }
 
-type PROpened struct {
+type PRLinked struct {
 	Envelope
 	EventKind string `json:"event_kind"`
-	PROpenedFields
+	PRLinkedFields
 }
 
 type Closed struct {
@@ -136,7 +136,7 @@ type Closed struct {
 
 func NewOpened(e Envelope, f OpenedFields) Opened       { return Opened{e, KindOpened, f} }
 func NewTurn(e Envelope, f TurnFields) Turn             { return Turn{e, KindTurn, f} }
-func NewPROpened(e Envelope, f PROpenedFields) PROpened { return PROpened{e, KindPROpened, f} }
+func NewPRLinked(e Envelope, f PRLinkedFields) PRLinked { return PRLinked{e, KindPRLinked, f} }
 func NewClosed(e Envelope, f ClosedFields) Closed       { return Closed{e, KindClosed, f} }
 
 // IngestRequest is a batch of session events, oldest first.

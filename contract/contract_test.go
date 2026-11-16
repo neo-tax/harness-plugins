@@ -68,11 +68,11 @@ func validOpened() map[string]any {
 	})
 }
 
-func validPROpened() map[string]any {
-	return with(envelope("session.pr_opened"), map[string]any{
-		"repo":      repo(),
-		"number":    42,
-		"timestamp": "2026-10-25T16:00:00Z",
+func validPRLinked() map[string]any {
+	return with(envelope("session.pr_linked"), map[string]any{
+		"repo":          repo(),
+		"number":        42,
+		"first_seen_at": "2026-10-25T16:00:00Z",
 	})
 }
 
@@ -105,7 +105,7 @@ func marshal(t *testing.T, v any) []byte {
 // @spec: session-event-wire-contract#envelope-fields
 func TestEveryEventKindValidates(t *testing.T) {
 	for name, ev := range map[string]map[string]any{
-		"opened": validOpened(), "turn": validTurn(), "pr_opened": validPROpened(), "closed": validClosed(),
+		"opened": validOpened(), "turn": validTurn(), "pr_linked": validPRLinked(), "closed": validClosed(),
 	} {
 		if err := contract.ValidateEvent(marshal(t, ev)); err != nil {
 			t.Errorf("%s: %v", name, err)
@@ -128,7 +128,7 @@ func TestEventRejections(t *testing.T) {
 		"bad usage source":          with(validTurn(), map[string]any{"usage": with(usage(), map[string]any{"source": "guess"})}),
 		// @spec: session-event-wire-contract#repo-shape
 		"uppercase repo owner": with(validOpened(), map[string]any{"repo": with(repo(), map[string]any{"owner": "Neo-Tax"})}),
-		"repo missing name":    with(validPROpened(), map[string]any{"repo": without(repo(), "name")}),
+		"repo missing name":    with(validPRLinked(), map[string]any{"repo": without(repo(), "name")}),
 		// @spec: session-event-wire-contract#closed-fields
 		"closed missing side_usage": without(validClosed(), "side_usage"),
 		// @spec: session-event-wire-contract#side-usage-shape

@@ -190,7 +190,7 @@ func TestSessionLifecycle(t *testing.T) {
 	w.hook("Stop", nil)
 	w.hook("SessionEnd", map[string]any{"reason": "prompt_input_exit"})
 	got := w.recorded()
-	if k := kinds(got); k != "opened,turn,turn,pr_opened,turn,closed" {
+	if k := kinds(got); k != "opened,turn,turn,pr_linked,turn,closed" {
 		t.Fatalf("recorded %s", k)
 	}
 	for _, e := range got {
@@ -209,7 +209,7 @@ func TestQueuedBeforeEnrollmentDeliveredAfter(t *testing.T) {
 	}
 	w.login()
 	w.hook("Stop", nil)
-	if k := kinds(w.recorded()); k != "opened,turn,turn,pr_opened,turn" {
+	if k := kinds(w.recorded()); k != "opened,turn,turn,pr_linked,turn" {
 		t.Fatalf("recorded %s", k)
 	}
 }
@@ -244,7 +244,7 @@ func TestAuthRejectionNeedsReEnrollment(t *testing.T) {
 	}
 	w.login()
 	w.hook("SessionEnd", map[string]any{"reason": "other"})
-	if k := kinds(w.recorded()); k != "opened,turn,turn,pr_opened,turn,closed" {
+	if k := kinds(w.recorded()); k != "opened,turn,turn,pr_linked,turn,closed" {
 		t.Fatalf("recorded %s", k)
 	}
 }
@@ -261,7 +261,7 @@ func TestSchemaRejectionDeadLetters(t *testing.T) {
 		t.Fatalf("dead letters %v", dl)
 	}
 	w.hook("Stop", nil)
-	if k := kinds(w.recorded()); k != "turn,turn,pr_opened,turn" {
+	if k := kinds(w.recorded()); k != "turn,turn,pr_linked,turn" {
 		t.Fatalf("recorded %s", k)
 	}
 }

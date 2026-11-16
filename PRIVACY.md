@@ -63,7 +63,7 @@ Prompt text, completion text, tool inputs, tool outputs, file paths, the working
 | `git_user_email` | The git user.email in effect for the repository (its own config, else the engineer's global git config), used only to join sessions to pull-request authors. |
 | `dropped_events` | How many events the agent discarded because its local queue was full. |
 
-### `session.pr_opened`
+### `session.pr_linked`
 
 | Field | Contents |
 | --- | --- |
@@ -80,7 +80,7 @@ Prompt text, completion text, tool inputs, tool outputs, file paths, the working
 | `repo.owner` | Organization or user that owns the repository. |
 | `repo.name` | Repository name. |
 | `number` | Pull request number. |
-| `timestamp` | When the pull request was recorded as opened. |
+| `first_seen_at` | When the session's transcript first recorded the link to the pull request. |
 
 ### `session.turn`
 

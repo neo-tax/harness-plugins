@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/url"
 	"os"
@@ -124,7 +125,8 @@ type tail struct {
 
 // readTail reads a transcript from its cursor to the last complete line and
 // returns one session.turn per assistant message not yet emitted and one
-// session.pr_opened per pull-request link line.
+// session.pr_linked per pull-request link line; tailWith drops the links the
+// session has already reported.
 //
 // @spec: claude-code-transcript-parser#turns-from-transcript-tail
 // @spec: claude-code-transcript-parser#dedupe-by-message-id
@@ -147,7 +149,7 @@ func readTail(ctx Context, path string, c cursor.Cursor, subagentID *string) (ta
 	// server's idempotency key discard what it has already seen.
 	head := firstLineID(f)
 	if fi.Size() < c.Offset || (c.Offset > 0 && c.Head != head) {
-		c = cursor.Cursor{Version: c.Version, Since: c.Since}
+		c = cursor.Cursor{Version: c.Version, Since: c.Since, PRLinks: c.PRLinks}
 	}
 	c.Head = head
 	out.cursor = c
@@ -190,8 +192,8 @@ func readTail(ctx Context, path string, c cursor.Cursor, subagentID *string) (ta
 			out.events = append(out.events, ctx.turn(l, subagentID, out.cursor.Version))
 		case l.Type == "pr-link" && l.PRNumber > 0 && !copiedFromParent(c, l):
 			// @spec: claude-code-transcript-parser#pr-link-lines
-			out.events = append(out.events, contract.NewPROpened(ctx.envelope(out.cursor.Version), contract.PROpenedFields{
-				Repo: prRepo(l.PRRepository, l.PRURL), Number: l.PRNumber, Timestamp: l.Timestamp.UTC(),
+			out.events = append(out.events, contract.NewPRLinked(ctx.envelope(out.cursor.Version), contract.PRLinkedFields{
+				Repo: prRepo(l.PRRepository, l.PRURL), Number: l.PRNumber, FirstSeenAt: l.Timestamp.UTC(),
 			}))
 		}
 	}
@@ -329,7 +331,64 @@ func tailWith(ctx Context, mainPath string, cursors map[string]cursor.Cursor) (R
 		id := subagentID(sub)
 		read(sub, &id)
 	}
+	res.Events = onePerLink(res.Events, moves, mainPath, cursors[mainPath].PRLinks)
 	return res, moves, errors.Join(errs...)
+}
+
+// onePerLink keeps one session.pr_linked per pull request the session has
+// not reported before, with the earliest time any copy was seen, and records
+// the new links on the main transcript's cursor. Claude Code appends a
+// pull request's link line again and again; without this every copy would
+// be an event.
+//
+// @spec: claude-code-transcript-parser#pr-link-once-per-session
+func onePerLink(events []any, moves map[string]cursor.Cursor, mainPath string, reported []string) []any {
+	done := map[string]bool{}
+	for _, k := range reported {
+		done[k] = true
+	}
+	first := map[string]int{}
+	var added []string
+	out := events[:0]
+	for _, e := range events {
+		pr, ok := e.(contract.PRLinked)
+		if !ok {
+			out = append(out, e)
+			continue
+		}
+		k := linkKey(pr.Repo, pr.Number)
+		if done[k] {
+			continue
+		}
+		if i, ok := first[k]; ok {
+			if kept := out[i].(contract.PRLinked); pr.FirstSeenAt.Before(kept.FirstSeenAt) {
+				kept.FirstSeenAt = pr.FirstSeenAt
+				out[i] = kept
+			}
+			continue
+		}
+		first[k] = len(out)
+		added = append(added, k)
+		out = append(out, pr)
+	}
+	if len(added) > 0 {
+		if m, ok := moves[mainPath]; ok {
+			m.PRLinks = append(append([]string(nil), reported...), added...)
+			moves[mainPath] = m
+		}
+	}
+	return out
+}
+
+// linkKey is a short hash of a pull request's repo and number, so the
+// cursor file does not list the repositories the engineer worked on.
+func linkKey(r *contract.Repo, n int64) string {
+	repo := "-"
+	if r != nil {
+		repo = r.Host + "/" + r.Owner + "/" + r.Name
+	}
+	sum := sha256.Sum256([]byte(fmt.Sprint(repo, "#", n)))
+	return hex.EncodeToString(sum[:8])
 }
 
 // SupportedVersions are the Claude Code versions with a parser fixture under
