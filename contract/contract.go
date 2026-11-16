@@ -9,11 +9,15 @@ package contract
 import (
 	"bytes"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
+	"sort"
+	"strings"
 	"sync"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 )
 
 // Version is the contract_version this build of the contract defines.
@@ -122,3 +126,69 @@ func ValidateEnrollmentRequest(raw []byte) error { return validate("enrollment_r
 
 // ValidateEnrollmentResponse validates a successful enrollment response.
 func ValidateEnrollmentResponse(raw []byte) error { return validate("enrollment_response", raw) }
+
+// ErrorClass describes a validation error by the keywords that failed and the
+// locations they failed at, for example "pattern at /head_sha". It never
+// includes an instance value: the validator's own message echoes the value
+// for some keywords (pattern, format), so it must not reach a log line.
+//
+// Under the event schema's oneOf, branches for other event kinds always fail
+// on event_kind; those branches are skipped so the class names only what is
+// wrong with the event's own kind.
+//
+// @spec: field-allowlist#values-validated-before-queue
+func ErrorClass(err error) string {
+	var ve *jsonschema.ValidationError
+	if !errors.As(err, &ve) {
+		return "not a schema validation error"
+	}
+	seen := map[string]bool{}
+	var out, fallback []string
+	var walk func(e *jsonschema.ValidationError)
+	walk = func(e *jsonschema.ValidationError) {
+		if len(e.Causes) == 0 {
+			kw := "false schema"
+			if p := e.ErrorKind.KeywordPath(); len(p) > 0 {
+				kw = p[len(p)-1]
+			}
+			s := kw + " at /" + strings.Join(e.InstanceLocation, "/")
+			if seen[s] {
+				return
+			}
+			seen[s] = true
+			if _, ok := e.ErrorKind.(*kind.FalseSchema); ok {
+				// unevaluatedProperties noise that follows a failed oneOf.
+				fallback = append(fallback, s)
+			} else {
+				out = append(out, s)
+			}
+			return
+		}
+		for _, c := range e.Causes {
+			if _, ok := e.ErrorKind.(*kind.OneOf); ok && failsEventKind(c) {
+				continue
+			}
+			walk(c)
+		}
+	}
+	walk(ve)
+	if len(out) == 0 {
+		out = fallback
+	}
+	sort.Strings(out)
+	return strings.Join(out, "; ")
+}
+
+// failsEventKind reports whether a oneOf branch failed because event_kind is
+// another kind's.
+func failsEventKind(e *jsonschema.ValidationError) bool {
+	if _, ok := e.ErrorKind.(*kind.Const); ok && len(e.InstanceLocation) == 1 && e.InstanceLocation[0] == "event_kind" {
+		return true
+	}
+	for _, c := range e.Causes {
+		if failsEventKind(c) {
+			return true
+		}
+	}
+	return false
+}
