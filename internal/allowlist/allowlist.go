@@ -51,7 +51,6 @@ var repo = Field{"repo", "Repository host, owner, and name parsed from the git r
 var branch = Field{"branch", "Current git branch name; null on a detached HEAD or outside git.", nil, false}
 var headSHA = Field{"head_sha", "Commit hash HEAD pointed at.", nil, false}
 
-// @spec: field-allowlist#git-user-email-included
 // @spec: field-allowlist#request-id-included
 var byKind = map[string][]Field{
 	contract.KindOpened: {
@@ -59,7 +58,6 @@ var byKind = map[string][]Field{
 		{"entrypoint", "How the harness was launched, for example cli or sdk.", nil, false},
 		{"source", "Why the session started: startup, resume, clear, or compact.", nil, false},
 		repo, branch, headSHA,
-		{"git_user_email", "The git user.email in effect for the repository (its own config, else the engineer's global git config), used only to join sessions to pull-request authors.", nil, false},
 		{"dropped_events", "How many events the agent discarded because its local queue was full.", nil, false},
 	},
 	contract.KindTurn: {
@@ -76,13 +74,14 @@ var byKind = map[string][]Field{
 			{"cache_write_1h", "Input tokens written to the one-hour prompt cache.", nil, false},
 			{"cache_read", "Input tokens read from the prompt cache.", nil, false},
 			{"service_tier", "Vendor service tier the request ran on.", nil, false},
+			{"speed", "Speed the request ran at, standard or fast, which sets its price per token.", nil, false},
 			{"source", "Where the counts came from: payload, transcript, or unknown.", nil, false},
 		}, false},
 	},
-	contract.KindPROpened: {
+	contract.KindPRLinked: {
 		repo,
 		{"number", "Pull request number.", nil, false},
-		{"timestamp", "When the pull request was recorded as opened.", nil, false},
+		{"first_seen_at", "When the session's transcript first recorded the link to the pull request.", nil, false},
 	},
 	contract.KindClosed: {
 		{"ended_at", "When the session ended.", nil, false},

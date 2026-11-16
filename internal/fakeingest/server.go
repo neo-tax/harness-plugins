@@ -1,4 +1,4 @@
-// Package fakeingest is a stand-in for Neo.Tax's enrollment and ingest
+// Package fakeingest is a stand-in for Neo.Tax's enrollment, ingest, and OTLP
 // endpoints. It validates every request against the schema documents in this
 // repository's contract package and records what it accepts, so tests,
 // dogfooding, and security reviewers can see exactly what the agent sends.
@@ -31,8 +31,20 @@ type Options struct {
 	IngestBaseURL string
 	// StallFor is how long the stall fault holds a request. Defaults to 30s.
 	StallFor time.Duration
-	// Record, when set, receives one JSON line per accepted event.
+	// Record, when set, receives one JSON line per accepted event, as it
+	// was first accepted; a shared event later filed under another session
+	// (see owners) is not rewritten there, but GET /_fake/events shows it.
 	Record io.Writer
+	// RecordDuplicates, when set, receives one JSON line per event dropped
+	// as a duplicate, so a caller can see what was re-sent, not only how
+	// many.
+	RecordDuplicates io.Writer
+	// IngestKeys, when non-empty, is the set of keys the OTLP endpoints
+	// accept. When empty, any key that is not a device key is accepted.
+	IngestKeys []string
+	// RecordOTLP, when set, receives one JSON line per OTLP log record or
+	// metric data point received.
+	RecordOTLP io.Writer
 }
 
 // Fault modes the server can be instructed to return.
@@ -62,13 +74,15 @@ type Server struct {
 	opts Options
 	mux  *http.ServeMux
 
-	mu        sync.Mutex
-	devices   []*device
-	byKey     map[string]*device
-	seen      map[string]bool
-	events    []json.RawMessage
-	fault     string
-	faultLeft int
+	mu          sync.Mutex
+	devices     []*device
+	byKey       map[string]*device
+	seen        map[string]int // idempotency key to its index in events
+	events      []json.RawMessage
+	owners      owners
+	otlpRecords []json.RawMessage
+	fault       string
+	faultLeft   int
 }
 
 // New returns a fake ingest server.
@@ -76,9 +90,13 @@ func New(opts Options) *Server {
 	if opts.StallFor == 0 {
 		opts.StallFor = 30 * time.Second
 	}
-	s := &Server{opts: opts, mux: http.NewServeMux(), byKey: map[string]*device{}, seen: map[string]bool{}}
+	s := &Server{opts: opts, mux: http.NewServeMux(), byKey: map[string]*device{}, seen: map[string]int{}, owners: newOwners()}
 	s.mux.HandleFunc("POST /v1/enroll", s.enroll)
 	s.mux.HandleFunc("POST /v1/events", s.ingest)
+	s.mux.HandleFunc("POST /otlp/v1/logs", s.otlp(signalLogs))
+	s.mux.HandleFunc("POST /otlp/v1/metrics", s.otlp(signalMetrics))
+	s.mux.HandleFunc("GET /_fake/otlp", s.listOTLP)
+	s.mux.HandleFunc("DELETE /_fake/otlp", s.resetOTLP)
 	s.mux.HandleFunc("GET /_fake/events", s.listEvents)
 	s.mux.HandleFunc("DELETE /_fake/events", s.resetEvents)
 	s.mux.HandleFunc("GET /_fake/enrollments", s.listEnrollments)
@@ -182,19 +200,28 @@ func (s *Server) takeFault() string {
 	return s.fault
 }
 
-// idempotencyKey is the server's notion of "the same event".
+// idempotencyKey is the server's notion of "the same event". Turns are
+// keyed without the session, so a fork's copies of its parent's add
+// nothing. A pull request link belongs to its session: the same pull
+// request linked from two sessions is two links, and a repeat within one
+// session adds nothing.
 //
 // @spec: session-event-wire-contract#idempotency-key
+// @spec: session-event-wire-contract#pr-link-per-session
 func idempotencyKey(ev map[string]any) string {
-	key := fmt.Sprint(ev["device_id"], "\x00", ev["session_id"], "\x00", ev["event_kind"])
-	if id, ok := ev["message_id"]; ok {
-		key += "\x00" + fmt.Sprint(id)
-	}
-	if ev["event_kind"] == contract.KindPROpened {
+	key := fmt.Sprint(ev["device_id"], "\x00", ev["event_kind"])
+	switch ev["event_kind"] {
+	case contract.KindTurn:
+		return key + "\x00" + fmt.Sprint(ev["message_id"])
+	case contract.KindPRLinked:
 		repo, _ := json.Marshal(ev["repo"])
-		key += "\x00" + string(repo) + "\x00" + fmt.Sprint(ev["number"])
+		return key + "\x00" + fmt.Sprint(ev["session_id"]) + "\x00" + string(repo) + "\x00" + fmt.Sprint(ev["number"])
+	case contract.KindClosed:
+		// A resumed session closes again; its later close is kept.
+		return key + "\x00" + fmt.Sprint(ev["session_id"], "\x00", ev["ended_at"])
+	default:
+		return key + "\x00" + fmt.Sprint(ev["session_id"])
 	}
-	return key
 }
 
 func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
@@ -270,12 +297,24 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		k := idempotencyKey(ev)
-		if s.seen[k] {
+		if idx, ok := s.seen[k]; ok {
+			if s.owners.report(k, ev, raw) {
+				s.events[idx] = s.owners.best(k)
+			}
 			resp.Duplicates++
+			if s.opts.RecordDuplicates != nil {
+				s.opts.RecordDuplicates.Write(append(append([]byte{}, raw...), '\n'))
+			}
 			continue
 		}
-		s.seen[k] = true
+		s.seen[k] = len(s.events)
 		s.events = append(s.events, raw)
+		s.owners.report(k, ev, raw)
+		if ev["event_kind"] == contract.KindOpened {
+			for _, moved := range s.owners.opened(ev) {
+				s.events[s.seen[moved]] = s.owners.best(moved)
+			}
+		}
 		resp.Accepted++
 		if s.opts.Record != nil {
 			s.opts.Record.Write(append(append([]byte{}, raw...), '\n'))
@@ -296,7 +335,7 @@ func (s *Server) listEvents(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) resetEvents(w http.ResponseWriter, _ *http.Request) {
 	s.mu.Lock()
-	s.events, s.seen = nil, map[string]bool{}
+	s.events, s.seen, s.owners = nil, map[string]int{}, newOwners()
 	s.mu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
 }

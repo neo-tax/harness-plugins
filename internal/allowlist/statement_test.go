@@ -64,8 +64,8 @@ func missingRows(section, prefix string, fields []allowlist.Field) []string {
 func TestStatementNamesIdentityLine(t *testing.T) {
 	s := allowlist.Statement()
 	for _, want := range []string{
-		"Neo.Tax receives two values meant to identify the engineer: the email the engineer confirms at enrollment",
-		"git `user.email` in effect for the repository",
+		"Neo.Tax receives one value meant to identify the engineer: the email the engineer confirms at enrollment",
+		"Events carry the device id",
 		"`branch` is free text the engineer or their tools choose",
 		"`repo.owner` is the account that owns the repository, which is a personal username",
 		"The device hostname, sent once at enrollment",
@@ -73,6 +73,9 @@ func TestStatementNamesIdentityLine(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Errorf("statement lacks %q", want)
 		}
+	}
+	if strings.Contains(s, "user.email") {
+		t.Error("statement still names the git email")
 	}
 }
 

@@ -4,8 +4,8 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-10-24
-updated: 2026-11-13
-version: 2
+updated: 2026-11-15
+version: 3
 affects:
   - internal/gitident/*.go
   - internal/allowlist/allowlist.go
@@ -25,7 +25,7 @@ Governs how the agent derives the `repo`, `branch`, and `head_sha` fields from t
 - `repo-null-outside-git`(tested): `repo`, `branch`, and `head_sha` are null when the working directory is not inside a git repository.
 - `host-preserved`(tested): A non-GitHub host is carried as its own `host` value; the agent does not drop or rewrite it.
 - `branch-exact`(tested): `branch` is the current branch name with case preserved, and is null on a detached HEAD.
-- `head-sha`(tested): `head_sha` is the full commit hash HEAD points at.
+- `head-sha`(tested): `head_sha` is the full commit hash HEAD points at, and is null on a branch with no commits yet.
 - `worktree-resolves-to-main-repo`(tested): A working directory inside a linked git worktree resolves to the same `repo` as the main checkout.
 - `single-git-invocation`(tested): The agent obtains all three values with one git process invocation per hook.
 - `git-failure-is-null`(tested): When git is absent or the invocation fails, all three fields are null and the event is still emitted.
@@ -44,6 +44,6 @@ Branch case is preserved because git branch names are case-sensitive; the server
 - **A repository with no remote.** `repo` is null and sessions cannot be joined to a PR. Accepted; the session still counts toward the device and shows as unmatched.
 - **Remotes outside the conservative charset.** A repository whose host or path uses characters beyond letters, digits, `.`, `-`, and `_` (an IPv6 literal host, a percent-encoded or non-ASCII name) gets a null `repo`. Accepted; the major forges restrict names to that charset, and a missed join is cheaper than a leaked path.
 - **Host aliases.** A remote written with an SSH `Host` alias (`git@github-work:owner/repo`) or a `url.<base>.insteadOf` prefix (`gh:owner/repo`) is parsed as written: the alias is carried as `host` because the agent does not apply SSH or git rewriting. Accepted; `owner` and `name` are still right, and the server can match on them.
-- **Conditional includes other than `gitdir`, `gitdir/i`, and `onbranch`.** The agent follows `include.path` and those `includeIf` conditions as git does, but does not evaluate others (such as `hasconfig:`), so a remote or email set only under one is not seen. Accepted for v0.1.
+- **Conditional includes other than `gitdir`, `gitdir/i`, and `onbranch`.** The agent follows `include.path` and those `includeIf` conditions as git does, but does not evaluate others (such as `hasconfig:`), so a remote set only under one is not seen. Accepted for v0.1.
 - **A reftable repository with no commits yet.** `branch` is null rather than the branch name, because an unborn HEAD is read from the HEAD file and reftable keeps only a placeholder there. Accepted; the first commit fixes it.
 - **Forks whose `origin` is the fork.** `repo` names the fork, not the upstream the PR targets. Accepted for v0.1; the server can match on `head_sha` and the PR's head repository.

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -109,7 +110,7 @@ func TestSessionStartEmitsOpened(t *testing.T) {
 	dev, _ := enroll.Load(h.data)
 	want := map[string]any{
 		"event_kind": "session.opened", "source": "resume", "entrypoint": "cli", "branch": "Main-Branch",
-		"git_user_email": "dev@example.com", "session_id": "fixture-session", "device_id": dev.DeviceID,
+		"session_id": "fixture-session", "device_id": dev.DeviceID,
 		"harness": "claude-code", "harness_version": "2.1.311", "started_at": "2026-10-25T12:00:00Z", "dropped_events": float64(0),
 	}
 	for k, v := range want {
@@ -321,5 +322,70 @@ func TestBusyCursorLockStillEmitsLifecycleEvents(t *testing.T) {
 	h.run("SessionEnd", map[string]any{"reason": "other"})
 	if k := strings.Join(kinds(h.recorded()), ","); k != "session.opened,session.closed" {
 		t.Fatalf("recorded %s", k)
+	}
+}
+
+// A fork's transcript starts with copies of its parent's lines, which the
+// parent's hooks already sent. The fork sends only the turns after its
+// start, so the server never sees the parent's turns under the fork's id.
+// @spec: claude-code-transcript-parser#fork-skips-copied-lines
+func TestForkSkipsTurnsCopiedFromItsParent(t *testing.T) {
+	h := newHookEnv(t, true)
+	// The fixture's lines all predate h.now: they stand for the copies.
+	if err := h.run("SessionStart", map[string]any{"source": "fork"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.run("Stop", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := kinds(h.recorded()); !reflect.DeepEqual(got, []string{"session.opened"}) {
+		t.Fatalf("after the copies, recorded %v", got)
+	}
+	h.appendLines(`{"type":"assistant","uuid":"f1","sessionId":"fixture-session","timestamp":"2026-10-25T12:00:05.000Z","version":"2.1.310","requestId":"req_F","message":{"id":"msg_F","model":"claude-opus-5-5","role":"assistant","content":[],"usage":{"input_tokens":1,"output_tokens":2,"cache_read_input_tokens":0}}}`)
+	if err := h.run("Stop", nil); err != nil {
+		t.Fatal(err)
+	}
+	evs := h.recorded()
+	if got := kinds(evs); !reflect.DeepEqual(got, []string{"session.opened", "session.turn"}) {
+		t.Fatalf("recorded %v", got)
+	}
+	if evs[1]["message_id"] != "msg_F" {
+		t.Fatalf("turn %v, want the fork's own msg_F", evs[1]["message_id"])
+	}
+}
+
+// Claude Code may write a fork's transcript only after its SessionStart, and
+// another session's hook can prune cursors in between; the fork's start is
+// kept until its transcript appears.
+// @spec: claude-code-transcript-parser#fork-skips-copied-lines
+func TestForkStartSurvivesUntilItsTranscriptIsWritten(t *testing.T) {
+	h := newHookEnv(t, true)
+	copies, err := os.ReadFile(h.transcript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fork := filepath.Join(filepath.Dir(h.transcript), "fork-session.jsonl")
+	// A pending fork's start is kept for a day of wall-clock time.
+	h.now = time.Now().UTC()
+	if err := h.run("SessionStart", map[string]any{"source": "fork", "session_id": "fork-session", "transcript_path": fork}); err != nil {
+		t.Fatal(err)
+	}
+	// Another session's Stop rewrites the cursor file. It has no turns, so
+	// the fork's copies, if sent, would be the first the server stores.
+	other := filepath.Join(filepath.Dir(h.transcript), "other-session.jsonl")
+	if err := os.WriteFile(other, []byte(`{"type":"user","sessionId":"other-session","timestamp":"2026-10-25T11:00:00Z"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.run("Stop", map[string]any{"session_id": "other-session", "transcript_path": other}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fork, copies, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.run("Stop", map[string]any{"session_id": "fork-session", "transcript_path": fork}); err != nil {
+		t.Fatal(err)
+	}
+	if got := kinds(h.recorded()); !reflect.DeepEqual(got, []string{"session.opened"}) {
+		t.Fatalf("the fork sent its copies: %v", got)
 	}
 }

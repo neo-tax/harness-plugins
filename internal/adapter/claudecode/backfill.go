@@ -92,11 +92,14 @@ const (
 	waitCanceled
 )
 
-// Backfill emits events for every Claude Code transcript on disk, newest
-// first, from the beginning, flushing as it goes. A full run resets every
-// cursor first; a run that follows a paused one resumes after the
-// transcripts the paused run queued, unless o.Restart is set. It runs as its
-// own command, never under a hook.
+// Backfill emits events for every Claude Code transcript on disk that the
+// agent has not read, newest first, from the beginning, flushing as it
+// goes. A transcript with a cursor was read by a hook or an earlier
+// backfill, which queued its events, so it is skipped and its cursor kept;
+// o.Restart resets every cursor and reads every transcript again. A run
+// that follows a paused one resumes after the transcripts the paused run
+// queued, unless o.Restart is set. It runs as its own command, never under
+// a hook.
 //
 // @spec: event-queue-and-backfill#backfill-scope
 // @spec: event-queue-and-backfill#backfill-lock
@@ -195,24 +198,29 @@ func Backfill(ctx context.Context, o BackfillOptions) error {
 	}
 	status := BackfillStatus{StartedAt: o.Now().UTC(), Resume: resume}
 	store := cursor.Open(o.DataDir)
-	if resume == nil {
+	if o.Restart {
 		if err := withCursorLock(store, store.Reset); err != nil {
 			return err
 		}
-	} else {
-		// Cursors are left alone: the transcripts already queued keep the
-		// cursors the paused run recorded, and the ones after the resume
-		// point have had none since the paused run reset them, unless a
-		// hook has read them since, which also moved them past the resume
-		// point.
+	} else if resume != nil {
+		// The transcripts already queued keep the cursors the paused run
+		// recorded; the ones after the resume point are read unless a hook
+		// has read them since.
 		status.Sessions, status.Events = prev.Sessions, prev.Events
 		fmt.Fprintln(o.Out, "Resuming the paused backfill.")
 	}
 	writeBackfillStatus(o.DataDir, status)
 
 	transcripts := mainTranscripts(filepath.Join(o.ConfigDir, "projects"))
+	// Forks are found across every transcript, before a resume point drops
+	// some, since a fork's parent may already have been queued.
+	forks := findForks(transcripts)
 	if resume != nil {
 		transcripts = after(transcripts, *resume)
+	}
+	// @spec: event-queue-and-backfill#backfill-skips-read-transcripts
+	if !o.Restart {
+		transcripts = unread(transcripts, store.All())
 	}
 	sessions, events := status.Sessions, status.Events
 	// Cursors were reset, or the transcripts left have none, so transcripts
@@ -262,7 +270,7 @@ func Backfill(ctx context.Context, o BackfillOptions) error {
 		if ctx.Err() != nil {
 			return pause(waitCanceled)
 		}
-		n, moves, err := backfillOne(a, t.path, dev.DeviceID, o)
+		n, moves, err := backfillOne(a, t.path, dev.DeviceID, forks[t.path], o)
 		if err != nil {
 			agent.Logf(o.DataDir, "backfill transcript failed: %s", errClass(err))
 		}
@@ -463,6 +471,10 @@ type transcript struct {
 // sessionStart is what a backfill knows about how a past session began. Cwd
 // is read only to find the repository; it never reaches an event.
 type sessionStart struct {
+	// UUID is the session's first line uuid. A fork's transcript begins
+	// with copies of its parent's lines, uuids included, so a fork and its
+	// parent share it.
+	UUID       string    `json:"uuid"`
 	Timestamp  time.Time `json:"timestamp"`
 	Cwd        string    `json:"cwd"`
 	GitBranch  string    `json:"gitBranch"`
@@ -494,8 +506,15 @@ func readSessionStart(path string) (sessionStart, bool) {
 		if json.Unmarshal(sc.Bytes(), &s) != nil || s.Timestamp.IsZero() {
 			continue
 		}
+		if out.UUID == "" {
+			out.UUID = s.UUID
+		}
 		if !found {
+			uuid := out.UUID
 			out, found = s, true
+			if uuid != "" {
+				out.UUID = uuid
+			}
 		}
 		if out.Cwd == "" {
 			out.Cwd = s.Cwd
@@ -509,7 +528,7 @@ func readSessionStart(path string) (sessionStart, bool) {
 		if out.Version == "" {
 			out.Version = s.Version
 		}
-		if out.Cwd != "" && out.GitBranch != "" && out.Entrypoint != "" && out.Version != "" {
+		if out.Cwd != "" && out.GitBranch != "" && out.Entrypoint != "" && out.Version != "" && out.UUID != "" {
 			break
 		}
 	}
@@ -520,14 +539,18 @@ func readSessionStart(path string) (sessionStart, bool) {
 // pull-request link in its transcripts. The session's repository comes from
 // its working directory as it is today; branches come from the transcript,
 // and head_sha is null because the commit at the time is unknown.
-func backfillOne(a *agent.Agent, path, deviceID string, o BackfillOptions) (int, map[string]cursor.Cursor, error) {
+func backfillOne(a *agent.Agent, path, deviceID string, copied map[string]bool, o BackfillOptions) (int, map[string]cursor.Cursor, error) {
 	start, ok := readSessionStart(path)
 	if !ok {
 		return 0, nil, nil
 	}
 	git := gitident.Identify(start.Cwd)
 	sessionID := sessionIDOf(path)
-	ctx := Context{DeviceID: deviceID, AgentVersion: o.AgentVersion, SessionID: sessionID, Now: o.Now()}
+	ctx := Context{DeviceID: deviceID, AgentVersion: o.AgentVersion, SessionID: sessionID, Now: o.Now(), copied: copied}
+	var source *string
+	if copied != nil {
+		source = nonEmpty("fork")
+	}
 
 	res, moves, err := tailWith(ctx, path, nil)
 	if err != nil {
@@ -536,11 +559,11 @@ func backfillOne(a *agent.Agent, path, deviceID string, o BackfillOptions) (int,
 		agent.Logf(o.DataDir, "backfill transcript read failed: %s", errClass(err))
 	}
 	opened := contract.NewOpened(ctx.envelope(start.Version), contract.OpenedFields{
-		StartedAt:    start.Timestamp.UTC(),
-		Entrypoint:   nonEmpty(start.Entrypoint),
-		Repo:         git.Repo,
-		Branch:       nonEmpty(start.GitBranch),
-		GitUserEmail: git.UserEmail,
+		StartedAt:  start.Timestamp.UTC(),
+		Entrypoint: nonEmpty(start.Entrypoint),
+		Source:     source,
+		Repo:       git.Repo,
+		Branch:     nonEmpty(start.GitBranch),
 	})
 	events := append([]any{opened}, res.Events...)
 	// The close carries the version the session ended on, as SessionEnd's
@@ -549,7 +572,9 @@ func backfillOne(a *agent.Agent, path, deviceID string, o BackfillOptions) (int,
 	if v := moves[path].Version; v != "" {
 		endVersion = v
 	}
-	if c, ok := backfillClose(ctx, path, endVersion, res.Events, err); ok {
+	// Side usage is the session totals less every turn in the transcript,
+	// copies included, as at SessionEnd.
+	if c, ok := backfillClose(ctx, path, endVersion, append(append([]any(nil), res.Events...), res.CopiedTurns...), err); ok {
 		events = append(events, c)
 	}
 	if err := a.Emit(events...); err != nil {
@@ -606,4 +631,115 @@ func isSessionID(s string) bool {
 		}
 	}
 	return true
+}
+
+// findForks finds the forks among a backfill's transcripts and, for each,
+// the uuids of the lines Claude Code copied into it from the sessions it
+// was forked from. Claude Code marks neither a fork nor its copies, but a
+// copy keeps its line's uuid, so a fork shares its first line's uuid with
+// its parent. Among transcripts that share one, a transcript all of whose
+// lines another also has is the earlier (a parent that stopped once
+// forked); otherwise the earlier is the one whose first timestamped line
+// is earlier, since a fork opens with its own start lines, timestamped
+// after the copies that follow them. Each later transcript is a fork of
+// the earlier ones, and its copies are the lines it shares with them.
+// Only transcripts that share a first line are read in full.
+//
+// @spec: event-queue-and-backfill#backfill-skips-fork-copies
+func findForks(ts []transcript) map[string]map[string]bool {
+	type member struct {
+		path  string
+		start time.Time
+		lines map[string]bool
+	}
+	byFirst := map[string][]*member{}
+	for _, t := range ts {
+		if st, ok := readSessionStart(t.path); ok && st.UUID != "" {
+			byFirst[st.UUID] = append(byFirst[st.UUID], &member{path: t.path, start: st.Timestamp})
+		}
+	}
+	forks := map[string]map[string]bool{}
+	for _, group := range byFirst {
+		if len(group) < 2 {
+			continue
+		}
+		for _, m := range group {
+			m.lines = lineUUIDs(m.path)
+		}
+		// only counts a's lines that b lacks.
+		only := func(a, b *member) int {
+			n := 0
+			for u := range a.lines {
+				if !b.lines[u] {
+					n++
+				}
+			}
+			return n
+		}
+		sort.SliceStable(group, func(i, j int) bool {
+			a, b := group[i], group[j]
+			ai, bi := only(a, b), only(b, a)
+			switch {
+			case ai == 0 && bi > 0:
+				return true
+			case bi == 0 && ai > 0:
+				return false
+			case !a.start.Equal(b.start):
+				return a.start.Before(b.start)
+			}
+			return a.path < b.path
+		})
+		earlier := map[string]bool{}
+		for i, m := range group {
+			if i > 0 {
+				copied := map[string]bool{}
+				for u := range m.lines {
+					if earlier[u] {
+						copied[u] = true
+					}
+				}
+				forks[m.path] = copied
+			}
+			for u := range m.lines {
+				earlier[u] = true
+			}
+		}
+	}
+	return forks
+}
+
+// lineUUIDs is the set of line uuids in a transcript.
+func lineUUIDs(path string) map[string]bool {
+	out := map[string]bool{}
+	f, err := os.Open(path)
+	if err != nil {
+		return out
+	}
+	defer f.Close()
+	r := bufio.NewReaderSize(f, 256<<10)
+	for {
+		raw, err := r.ReadBytes('\n')
+		var l struct {
+			UUID string `json:"uuid"`
+		}
+		if len(raw) > 0 && json.Unmarshal(raw, &l) == nil && l.UUID != "" {
+			out[l.UUID] = true
+		}
+		if err != nil {
+			return out
+		}
+	}
+}
+
+// unread is the transcripts with no cursor: those no hook or earlier
+// backfill has read. A session's subagent transcripts are read with its
+// main one, so the main transcript's cursor decides.
+func unread(ts []transcript, cursors map[string]cursor.Cursor) []transcript {
+	var out []transcript
+	for _, t := range ts {
+		if _, ok := cursors[t.path]; !ok {
+			out = append(out, t)
+		}
+	}
+	return out
 }

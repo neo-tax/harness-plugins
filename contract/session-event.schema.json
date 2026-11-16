@@ -12,13 +12,13 @@
     "harness_version": { "type": ["string", "null"], "description": "Harness version recorded for the session." },
     "agent_version": { "type": "string", "minLength": 1, "description": "Version of neo-tax-agent that emitted the event." },
     "session_id": { "type": "string", "minLength": 1, "description": "The harness's own session id." },
-    "event_kind": { "enum": ["session.opened", "session.turn", "session.pr_opened", "session.closed"] },
+    "event_kind": { "enum": ["session.opened", "session.turn", "session.pr_linked", "session.closed"] },
     "sent_at": { "$ref": "#/$defs/timestamp", "description": "When the agent created the event." }
   },
   "oneOf": [
     { "$ref": "#/$defs/opened" },
     { "$ref": "#/$defs/turn" },
-    { "$ref": "#/$defs/pr_opened" },
+    { "$ref": "#/$defs/pr_linked" },
     { "$ref": "#/$defs/closed" }
   ],
   "unevaluatedProperties": false,
@@ -50,7 +50,7 @@
     "lowercase": { "type": "string", "minLength": 1, "pattern": "^[^A-Z]+$" },
     "usage": {
       "type": "object",
-      "required": ["input", "output", "cache_write_5m", "cache_write_1h", "cache_read", "service_tier", "source"],
+      "required": ["input", "output", "cache_write_5m", "cache_write_1h", "cache_read", "service_tier", "speed", "source"],
       "properties": {
         "input": { "$ref": "#/$defs/count" },
         "output": { "$ref": "#/$defs/count" },
@@ -58,6 +58,7 @@
         "cache_write_1h": { "$ref": "#/$defs/count" },
         "cache_read": { "$ref": "#/$defs/count" },
         "service_tier": { "$ref": "#/$defs/nullable_string" },
+        "speed": { "$ref": "#/$defs/nullable_string" },
         "source": { "enum": ["payload", "transcript", "unknown"] }
       },
       "additionalProperties": false,
@@ -74,7 +75,7 @@
     },
     "opened": {
       "type": "object",
-      "required": ["event_kind", "started_at", "entrypoint", "source", "repo", "branch", "head_sha", "git_user_email", "dropped_events"],
+      "required": ["event_kind", "started_at", "entrypoint", "source", "repo", "branch", "head_sha", "dropped_events"],
       "properties": {
         "event_kind": { "const": "session.opened" },
         "started_at": { "$ref": "#/$defs/timestamp" },
@@ -83,7 +84,6 @@
         "repo": { "$ref": "#/$defs/repo" },
         "branch": { "$ref": "#/$defs/nullable_string" },
         "head_sha": { "$ref": "#/$defs/head_sha" },
-        "git_user_email": { "$ref": "#/$defs/nullable_string" },
         "dropped_events": { "type": "integer", "minimum": 0 }
       }
     },
@@ -102,14 +102,18 @@
         "usage": { "$ref": "#/$defs/usage" }
       }
     },
-    "pr_opened": {
+    "pr_linked": {
       "type": "object",
-      "required": ["event_kind", "repo", "number", "timestamp"],
+      "description": "A pull request the session is linked to, sent once per session for each repo and number.",
+      "required": ["event_kind", "repo", "number", "first_seen_at"],
       "properties": {
-        "event_kind": { "const": "session.pr_opened" },
+        "event_kind": { "const": "session.pr_linked" },
         "repo": { "$ref": "#/$defs/repo" },
         "number": { "type": "integer", "minimum": 1 },
-        "timestamp": { "$ref": "#/$defs/timestamp" }
+        "first_seen_at": {
+          "description": "When the session's transcript first records the link; not when the pull request was opened.",
+          "$ref": "#/$defs/timestamp"
+        }
       }
     },
     "closed": {

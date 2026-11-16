@@ -1,6 +1,7 @@
 package cursor_test
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/neo-tax/harness-plugins/internal/cursor"
@@ -10,7 +11,7 @@ import (
 func TestCursorPerTranscript(t *testing.T) {
 	dir := t.TempDir()
 	s := cursor.Open(dir)
-	if c := s.Get("/a/main.jsonl"); c != (cursor.Cursor{}) {
+	if c := s.Get("/a/main.jsonl"); !reflect.DeepEqual(c, cursor.Cursor{}) {
 		t.Fatalf("fresh cursor %+v", c)
 	}
 	if err := s.Put("/a/main.jsonl", cursor.Cursor{Offset: 120, MessageID: "msg_1", Version: "2.1.310"}); err != nil {
@@ -29,7 +30,7 @@ func TestCursorPerTranscript(t *testing.T) {
 	if err := s2.Reset(); err != nil {
 		t.Fatal(err)
 	}
-	if c := cursor.Open(dir).Get("/a/main.jsonl"); c != (cursor.Cursor{}) {
+	if c := cursor.Open(dir).Get("/a/main.jsonl"); !reflect.DeepEqual(c, cursor.Cursor{}) {
 		t.Fatalf("after reset %+v", c)
 	}
 }

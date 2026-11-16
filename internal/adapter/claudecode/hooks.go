@@ -146,9 +146,10 @@ func emit(a *agent.Agent, name string, p payload, o HookOptions) error {
 	// emitted, carrying no count. A skipped Stop or PreCompact tail is read
 	// by the session's next hook; SessionEnd has no next hook, so it waits
 	// three times as long, and a tail it still skips is recovered only by a
-	// backfill. The long wait is safe because the hook is async: Claude Code
-	// cancels a synchronous SessionEnd hook after 1.5 seconds, but lets an
-	// async one run to completion after it exits.
+	// backfill run with --restart. The long wait relies on the hook being
+	// async: Claude Code cancels a synchronous SessionEnd hook after 1.5
+	// seconds, and an async one ran to completion after it exited in our
+	// probes, though its docs say claude -p may kill one at teardown.
 	store := cursor.Open(o.DataDir)
 	wait := CursorWait
 	if name == "SessionEnd" {
@@ -185,10 +186,21 @@ func emit(a *agent.Agent, name string, p payload, o HookOptions) error {
 			Repo:          git.Repo,
 			Branch:        git.Branch,
 			HeadSHA:       git.HeadSHA,
-			GitUserEmail:  git.UserEmail,
 			DroppedEvents: dropped,
 		}))
 		carried = dropped
+		// A fork's transcript starts with copies of its parent's lines,
+		// which the parent's hooks already sent. Recording the start lets
+		// this session's reads skip them.
+		//
+		// @spec: claude-code-transcript-parser#fork-skips-copied-lines
+		if locked && p.Source == "fork" {
+			if _, ok := store.All()[p.TranscriptPath]; !ok {
+				if err := store.Put(p.TranscriptPath, cursor.Cursor{Since: ctx.Now.UTC()}); err != nil {
+					agent.Logf(o.DataDir, "hook=%s fork start not recorded: %s", name, errClass(err))
+				}
+			}
+		}
 	case "Stop", "PreCompact", "SessionEnd":
 		if locked {
 			res, err := TailEvents(ctx, p.TranscriptPath, store)

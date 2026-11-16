@@ -33,6 +33,7 @@ type fixture struct {
 	// holds it until the gate is closed.
 	enrollGate chan chan struct{}
 	gitDir     string
+	notice     string
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -71,6 +72,7 @@ func (f *fixture) opts(token, email string) enroll.Options {
 		Harness: "claude-code", HarnessVersion: "2.1.310", AgentVersion: "0.1.0",
 		AccountEmail: func() string { return "account@example.com" },
 		Out:          &f.out,
+		Notice:       f.notice,
 	}
 }
 

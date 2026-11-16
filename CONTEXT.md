@@ -16,13 +16,19 @@ The code that runs on an engineer's machine to observe AI coding sessions and re
 
 **Session**: One conversation an engineer has with a harness, identified by the harness's own session id.
 
-**Session event**: A normalized record the agent emits about a session (opened, turn, PR opened, closed), carrying only the device id and non-personal session metadata. _Avoid_: event, usage record, telemetry
+**Session event**: A normalized record the agent emits about a session (opened, turn, PR linked, closed), carrying only the device id and non-personal session metadata. _Avoid_: event, usage record, telemetry
 
-**Turn**: One API call's assistant response within a session; the unit at which usage is reported. A session event identifies it by the harness's message id, and the server joins it with telemetry on its call ids. A turn produced by a subagent belongs to the parent session and carries the subagent's id.
+**Turn**: One API call's assistant response within a session; the unit at which usage is reported. A session event identifies it by the harness's message id, and the server joins it with telemetry on its call ids. A turn produced by a subagent belongs to the parent session and carries the subagent's id. A turn that arrived as a session event is a plugin turn; one that arrived only as telemetry is a telemetry-only turn. _Avoid_: request, response, step
 
-**Subagent**: A child agent a harness spawns inside a session, with its own transcript and message ids but no session of its own. _Avoid_: sidechain, child session, sub-session _Avoid_: request, response, step
+**PR link**: A pull request a session touched, as the harness records it: opened, pushed to, or viewed from the session. A session links each pull request once, and one pull request can be linked to many sessions. _Avoid_: PR opened, PR event
 
-**Usage**: The token counts and pricing attributes of one turn (input, output, cache write by TTL, cache read, service tier), with a source of payload, transcript, or unknown. _Avoid_: cost, spend (those are dollars, computed server-side)
+**Fork**: A new session a harness starts from an existing one, whose transcript begins with copies of the parent session's lines. The parent's turns and PR links stay the parent's. _Avoid_: branch (a git term here), clone
+
+**Subagent**: A child agent a harness spawns inside a session, with its own transcript and message ids but no session of its own. _Avoid_: sidechain, child session, sub-session
+
+**Usage**: The token counts and pricing attributes of one turn (input, output, cache write by TTL, cache read, service tier, speed), with a source of payload, transcript, or unknown. _Avoid_: cost, spend (those are dollars, computed server-side)
+
+**Speed**: Whether a call ran in a vendor's fast mode, which is the same model at a higher price per token, or at standard speed. It is chosen per call, since fast mode falls back to standard speed when rate-limited, so it is part of a turn's usage rather than of its model. _Avoid_: tier (service tier is a separate attribute), priority
 
 **Side usage**: The usage of a session's model calls that produced no turn of their own (in Claude Code: the session title, the recap after time away, compaction's summary), reported per model on `session.closed` as the harness's session totals less every turn. _Avoid_: overhead, hidden usage, background usage
 
@@ -36,27 +42,39 @@ The code that runs on an engineer's machine to observe AI coding sessions and re
 
 **Enrollment token**: A short-lived token an admin mints and circulates so that devices can enroll; it can do nothing but enroll.
 
-**Telemetry**: A harness's own OpenTelemetry export, configured by the customer's admin and sent straight to Neo.Tax's OTLP endpoint without passing through the agent; Claude Code reports each API call as a `claude_code.api_request` record. _Avoid_: session event (that is the agent's), OTel data
+**Telemetry**: The OpenTelemetry logs and metrics a source sends straight to Neo.Tax's OTLP endpoint without passing through the agent, such as a harness's own export or a gateway's; Claude Code reports each API call as a `claude_code.api_request` record. _Avoid_: session event (that is the agent's), OTel data
+
+**Exporter**: The OpenTelemetry component in a harness, gateway, or collector that sends telemetry over OTLP, configured by environment variables or managed settings rather than by the agent. _Avoid_: agent (that is Neo.Tax's binary), shipper
+
+**Gateway**: A proxy between a harness and the model provider that relays API calls and can export telemetry of its own about them (Kong's AI Gateway, OpenRouter). _Avoid_: router, LLM proxy
+
+**Source**: One kind of sender to the OTLP endpoint (Claude Code's own export, a gateway, or a customer's OpenTelemetry Collector), with its own mapping and its own ingest keys. _Avoid_: provider (that is the model provider), integration
+
+**Mapping**: A source's rules for turning its telemetry's attribute names into the session record; the attributes a mapping names are the only ones the OTLP endpoint keeps. _Avoid_: parser (that is the adapter's, for transcripts), schema
+
+**Join**: The server's matching of a plugin turn and a telemetry record of the same API call into one turn, per organization on a shared call id. It is not a session event's idempotency key, which is per device on `message_id` and only decides whether an event is new. _Avoid_: merge, dedup
 
 **Call id**: The model provider's own id for one API call, the same on every path that saw the call: the response id (Anthropic's `msg_…`; the session event's `message_id`; OTLP's `gen_ai.response.id`) or the request id (`req_…`). _Avoid_: trace id, span id, generation id
 
-**Ingest key**: The organization-level credential a telemetry exporter or gateway presents to the OTLP endpoint; it authorizes OTLP ingest only and identifies no device or engineer. _Avoid_: device key, API key, OTLP token
+**Ingest key**: The organization-level credential a source's exporter presents to the OTLP endpoint; it authorizes OTLP ingest only and identifies no device or engineer. _Avoid_: device key, API key, OTLP token
 
 **Telemetry credential**: From v1.0, the short-lived credential the agent obtains with the device key and hands to Claude Code's telemetry exporter through `otelHeadersHelper`, so telemetry is attributed to that device. _Avoid_: OTEL token, device token
 
 **Wire contract**: The JSON Schema definitions of every request and response between the agent and Neo.Tax, owned by this repo and versioned by `contract_version`. _Avoid_: API, protocol, payload format
 
-**Cursor**: The agent's record, per transcript, of how far it has read and the last message it emitted, so each hook reads only the new tail.
+**Cursor**: The agent's record, per transcript, of how far it has read and the last message it emitted, so each hook reads only the new tail; a session's main-transcript cursor also records which PR links it has sent.
 
 **Dead letter**: A session event the server rejected for schema reasons, set aside on disk with the server's reason instead of being retried.
 
-**Backfill**: A run of the agent that resets every cursor and emits events for every transcript already on disk, newest first. _Avoid_: import, sync, replay
+**Backfill**: A run of the agent that emits events for every transcript on disk it has not already read, newest first; it pauses when ingest stays unavailable and the next run resumes where it stopped, and with `--restart` it resets every cursor and reads them all. _Avoid_: import, sync, replay
 
 **Launcher**: The script a plugin ships in place of the agent binary; it finds or downloads the agent for the plugin's version and execs it. _Avoid_: wrapper, shim
 
-**Fixture**: An anonymized transcript paired with the exact event stream the parser must produce from it.
+**Fixture**: A transcript, anonymized from a real one or written by hand (synthetic), paired with the exact event stream the parser must produce from it.
 
-**Fake ingest**: The shipped stand-in server that accepts the wire contract, validates it, and records what it receives, for tests, dogfooding, and security review.
+**Fake ingest**: The shipped stand-in server that accepts the wire contract, validates it, and records what it receives, for tests, dogfooding, and security review; it also accepts OTLP/JSON telemetry and records it unfiltered.
+
+**Contributor**: Neo.Tax's server-side record of one engineer, to which a device's confirmed email and a telemetry record's `user.email` are resolved. _Avoid_: user, member
 
 ## Relationships
 
@@ -66,7 +84,7 @@ The code that runs on an engineer's machine to observe AI coding sessions and re
 - A **Device** holds exactly one **Device key**, obtained through one **Enrollment**.
 - A **Device key** identifies exactly one engineer; a **Session event** identifies its **Device**, never the engineer directly.
 - A **Session** produces one or more **Session events**.
-- A **Turn** can arrive as a **Session event**, as **Telemetry**, or both; the server joins them on a shared **Call id**, response id first.
+- A **Turn** can arrive as a **Session event**, as **Telemetry**, or both; the server joins them on a shared **Call id**: the response id first where both records carry one, else the request id, which is the only call id Claude Code's telemetry carries.
 - An **Ingest key** belongs to one organization, never to a **Device**.
 
 ## Example dialogue
@@ -75,4 +93,4 @@ The code that runs on an engineer's machine to observe AI coding sessions and re
 
 ## Flagged ambiguities
 
-- "plugin" was used for both the installable unit and the per-harness code — resolved: the installable unit is a **Plugin**; the per-harness code is an **Adapter**.
+- "plugin" was used for both the installable unit and the per-harness code—resolved: the installable unit is a **Plugin**; the per-harness code is an **Adapter**.

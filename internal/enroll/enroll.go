@@ -129,8 +129,12 @@ type Options struct {
 	// TerminalCommand is the login command an engineer can run in a
 	// terminal instead; it is named whenever input is collected elsewhere.
 	TerminalCommand string
-	Out             io.Writer
-	HTTP            *http.Client
+	// Notice, when set, tells the engineer before they enroll what else
+	// enrolling does, such as sending past sessions; it is shown on the
+	// form above its button, or printed before the terminal prompts.
+	Notice string
+	Out    io.Writer
+	HTTP   *http.Client
 }
 
 // Login enrolls this device. Missing input is prompted for on a terminal,
@@ -157,6 +161,10 @@ func Login(ctx context.Context, o Options) error {
 			}
 			fmt.Fprintf(o.Out, "Enrolling needs your Neo.Tax enrollment token, which should not go through this conversation. Run this in a terminal:\n  %s\n", o.TerminalCommand)
 			return ErrNeedInput
+		}
+		// @spec: device-enrollment#backfill-disclosed-before-enrolling
+		if o.Notice != "" {
+			fmt.Fprintln(o.Out, o.Notice)
 		}
 		in := bufio.NewReader(o.In)
 		if token == "" {

@@ -68,7 +68,7 @@ func TestBackfillEmitsEveryTranscriptNewestFirst(t *testing.T) {
 	if strings.Join(sessions, ",") != "22222222-2222-4222-8222-222222222222,11111111-1111-4111-8111-111111111111" {
 		t.Fatalf("opened order %v", sessions)
 	}
-	if k := strings.Join(kinds(got), ","); k != "session.opened,session.turn,session.opened,session.turn,session.turn,session.pr_opened,session.turn,session.turn" {
+	if k := strings.Join(kinds(got), ","); k != "session.opened,session.turn,session.opened,session.turn,session.turn,session.pr_linked,session.turn,session.turn" {
 		t.Fatalf("recorded %s", k)
 	}
 	newOpened := got[0]
@@ -106,11 +106,11 @@ func TestSecondBackfillExits(t *testing.T) {
 	}
 }
 
-// Re-running resets every cursor and resends; the server's idempotency key
-// discards what it already has.
+// A --restart run resets every cursor and resends every session; the
+// server's idempotency key discards what it already has.
 // @spec: event-queue-and-backfill#backfill-command
 // @spec: event-queue-and-backfill#backfill-idempotent-server-side
-func TestRerunResetsCursorsAndResends(t *testing.T) {
+func TestRestartResetsCursorsAndResends(t *testing.T) {
 	h := newHookEnv(t, true)
 	root := projects(t, h.repo)
 	h.backfill(root)
@@ -119,9 +119,16 @@ func TestRerunResetsCursorsAndResends(t *testing.T) {
 	if c := cursor.Open(h.data).Get(main); c.Offset == 0 {
 		t.Fatal("cursor not advanced by backfill")
 	}
-	h.backfill(root)
+	var out bytes.Buffer
+	err := claudecode.Backfill(context.Background(), claudecode.BackfillOptions{
+		DataDir: h.data, ConfigDir: root, AgentVersion: "0.1.0", Now: func() time.Time { return h.now },
+		HTTP: &http.Client{Timeout: 5 * time.Second}, Out: &out, Restart: true,
+	})
+	if err != nil || !strings.Contains(out.String(), "Backfilled 2 sessions") {
+		t.Fatalf("restart did not resend: %q %v", out.String(), err)
+	}
 	if got := len(h.recorded()); got != first {
-		t.Fatalf("recorded %d after rerun, want %d (duplicates discarded)", got, first)
+		t.Fatalf("recorded %d after restart, want %d (duplicates discarded)", got, first)
 	}
 }
 
@@ -305,7 +312,7 @@ func TestBackfillResumesAfterPause(t *testing.T) {
 			t.Fatal("resumed run re-read a transcript the paused run queued")
 		}
 	}
-	if c := cursor.Open(h.data).Get(filepath.Join(proj, "00000000-0000-4000-8000-000000000001.jsonl")); c != cursorBefore {
+	if c := cursor.Open(h.data).Get(filepath.Join(proj, "00000000-0000-4000-8000-000000000001.jsonl")); !reflect.DeepEqual(c, cursorBefore) {
 		t.Errorf("queued transcript's cursor changed: %+v -> %+v", cursorBefore, c)
 	}
 	if c := cursor.Open(h.data).Get(filepath.Join(proj, fmt.Sprintf("00000000-0000-4000-8000-%012d.jsonl", n-1))); c.Offset == 0 {
@@ -520,7 +527,7 @@ func TestBackfillClosesSessionsThatEndedCleanly(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := h.recorded()
-	if k := strings.Join(kinds(got), ","); k != "session.opened,session.turn,session.opened,session.turn,session.turn,session.pr_opened,session.turn,session.turn,session.closed" {
+	if k := strings.Join(kinds(got), ","); k != "session.opened,session.turn,session.opened,session.turn,session.turn,session.pr_linked,session.turn,session.turn,session.closed" {
 		t.Fatalf("recorded %s", k)
 	}
 	c := got[len(got)-1]
@@ -608,5 +615,85 @@ func TestBackfillSkipsTranscriptsNotNamedBySessionID(t *testing.T) {
 	}
 	if !strings.Contains(out, "2 sessions") {
 		t.Errorf("output %q", out)
+	}
+}
+
+// A fork's transcript begins with copies of its parent's lines, uuids
+// included, and Claude Code marks neither. A backfill sends the copied turns
+// and pull request links once, under the parent, and opens the fork with
+// source fork. Covered both ways the parent is found: a parent that stopped
+// once forked, all of whose lines the fork has, and a parent that went on,
+// which the fork's later-timestamped start lines tell apart.
+// @spec: event-queue-and-backfill#backfill-skips-fork-copies
+func TestBackfillSendsAForksCopiedTurnsOnceUnderTheParent(t *testing.T) {
+	const parent, fork = "aaaaaaaa-0000-4000-8000-000000000001", "bbbbbbbb-0000-4000-8000-000000000002"
+	copied := `{"type":"user","uuid":"u1","timestamp":"2026-10-26T09:00:00Z","cwd":"REPO","version":"2.1.310","message":{"content":"x"}}
+{"type":"assistant","uuid":"a1","timestamp":"2026-10-26T09:00:01Z","version":"2.1.310","requestId":"req_1","message":{"id":"msg_1","model":"m","usage":{"input_tokens":1,"output_tokens":1}}}
+{"type":"pr-link","uuid":"p1","timestamp":"2026-10-26T09:00:02Z","prNumber":7,"prRepository":"o/r","prUrl":"https://github.com/o/r/pull/7"}
+`
+	own := func(id string, at string) string {
+		return `{"type":"assistant","uuid":"a-` + id + `","timestamp":"` + at + `","version":"2.1.310","requestId":"req_` + id + `","message":{"id":"msg_` + id + `","model":"m","usage":{"input_tokens":1,"output_tokens":1}}}` + "\n"
+	}
+	forkStart := `{"type":"queue-operation","operation":"enqueue","timestamp":"2026-10-26T10:00:00Z","sessionId":"` + fork + `"}` + "\n"
+	for name, c := range map[string]struct{ parent, fork string }{
+		"parent stopped": {copied, copied + own("F", "2026-10-26T10:00:05Z")},
+		"parent went on": {copied + own("P", "2026-10-26T10:30:00Z"), forkStart + copied + own("F", "2026-10-26T10:00:05Z")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHookEnv(t, true)
+			root := t.TempDir()
+			proj := filepath.Join(root, "projects", "-p")
+			os.MkdirAll(proj, 0o700)
+			os.WriteFile(filepath.Join(proj, parent+".jsonl"), []byte(strings.ReplaceAll(c.parent, "REPO", h.repo)), 0o600)
+			os.WriteFile(filepath.Join(proj, fork+".jsonl"), []byte(strings.ReplaceAll(c.fork, "REPO", h.repo)), 0o600)
+			if _, err := h.backfill(root); err != nil {
+				t.Fatal(err)
+			}
+			sessions := map[string][]string{}
+			for _, e := range h.recorded() {
+				sid := e["session_id"].(string)
+				switch e["event_kind"] {
+				case "session.turn":
+					sessions[sid] = append(sessions[sid], e["message_id"].(string))
+				case "session.pr_linked":
+					sessions[sid] = append(sessions[sid], "pr")
+				case "session.opened":
+					if want := map[string]any{parent: nil, fork: "fork"}[sid]; e["source"] != want {
+						t.Errorf("%s opened with source %v, want %v", sid, e["source"], want)
+					}
+				}
+			}
+			if got := strings.Join(sessions[parent], ","); !strings.HasPrefix(got, "msg_1,pr") {
+				t.Errorf("parent sent %s", got)
+			}
+			if got := strings.Join(sessions[fork], ","); got != "msg_F" {
+				t.Errorf("fork sent %s, want only its own turn", got)
+			}
+		})
+	}
+}
+
+// A backfill reads only the transcripts the agent has not read: a re-login
+// sends the sessions it has not seen, not the whole history again. Restart
+// reads everything again.
+// @spec: event-queue-and-backfill#backfill-skips-read-transcripts
+func TestBackfillSkipsTranscriptsAlreadyRead(t *testing.T) {
+	h := newHookEnv(t, true)
+	root := projects(t, h.repo)
+	if out, err := h.backfill(root); err != nil || !strings.Contains(out, "Backfilled 2 sessions") {
+		t.Fatalf("first: %q %v", out, err)
+	}
+	src, _ := os.ReadFile(filepath.Join(root, "projects", "-some-project", "22222222-2222-4222-8222-222222222222.jsonl"))
+	os.WriteFile(filepath.Join(root, "projects", "-some-project", "44444444-4444-4444-8444-444444444444.jsonl"), src, 0o600)
+	if out, err := h.backfill(root); err != nil || !strings.Contains(out, "Backfilled 1 sessions") {
+		t.Fatalf("second: %q %v", out, err)
+	}
+	var out bytes.Buffer
+	err := claudecode.Backfill(context.Background(), claudecode.BackfillOptions{
+		DataDir: h.data, ConfigDir: root, AgentVersion: "0.1.0", Now: func() time.Time { return h.now },
+		HTTP: &http.Client{Timeout: 5 * time.Second}, Out: &out, Restart: true,
+	})
+	if err != nil || !strings.Contains(out.String(), "Backfilled 3 sessions") {
+		t.Fatalf("restart: %q %v", out.String(), err)
 	}
 }

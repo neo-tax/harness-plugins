@@ -125,7 +125,7 @@ func browserLogin(ctx context.Context, o Options, candidates []string, token, em
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; form-action 'self'; frame-ancestors 'none'")
 		mu.Lock()
-		page := formPage{Candidates: candidates, Email: email, HasToken: token != "", Font: path + "/inter.woff2"}
+		page := formPage{Candidates: candidates, Email: email, HasToken: token != "", Font: path + "/inter.woff2", Notice: o.Notice}
 		mu.Unlock()
 		switch r.Method {
 		case http.MethodGet:
@@ -256,6 +256,7 @@ type formPage struct {
 	Expired    bool
 	HasToken   bool
 	Font       string
+	Notice     string
 }
 
 func (p formPage) render(w http.ResponseWriter) {
@@ -321,6 +322,7 @@ input:focus-visible, button:focus-visible { outline: 2px solid var(--focus); out
 button { margin-top: 24px; width: 100%; height: 44px; border: 0; border-radius: 4px; background: var(--action); color: var(--action-text); font: inherit; font-weight: 500; letter-spacing: -0.01em; cursor: pointer; transition: background-color .15s; }
 button:hover { background: var(--action-hover); }
 .err { color: var(--err); margin-top: 16px; }
+.note { color: var(--muted); font-size: 14px; margin-top: 20px; }
 </style>
 </head>
 <body>
@@ -346,6 +348,7 @@ button:hover { background: var(--action-hover); }
 </fieldset>{{else}}<label class="title" for="email_other">Your work email</label>
 <input id="email_other" name="email_other" type="email" required placeholder="you@company.com" value="{{.Email}}">{{end}}</div>
 {{if .Error}}<p class="err" role="alert">{{.Error}}</p>{{end}}
+{{if .Notice}}<p class="note">{{.Notice}}</p>{{end}}
 <button type="submit">Enroll this device</button>
 </form>
 {{end}}

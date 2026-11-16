@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -276,8 +277,10 @@ func TestRewrittenTranscriptOfSameLengthRereadFromStart(t *testing.T) {
 	rewritten := `{"type":"system","subtype":"compact_boundary","timestamp":"2026-10-25T11:00:00Z"}` + "\n" + strings.Join(lines[1:], "") + lines[1]
 	os.WriteFile(main, []byte(rewritten), 0o644)
 	again, _ := claudecode.TailEvents(fixtureContext(sid), main, store)
-	if len(again.Events) != 4 { // every main-transcript event, re-read
-		t.Fatalf("%d events", len(again.Events))
+	// Every main-transcript turn, re-read; the pull request link was
+	// already reported, so it is not sent again.
+	if k := kindsOf(again.Events); k != "session.turn,session.turn,session.turn" {
+		t.Fatalf("events %s", k)
 	}
 }
 
@@ -318,7 +321,74 @@ func TestRewriteDetectedWithLongFirstLine(t *testing.T) {
 	other := `{"type":"user","message":{"content":"` + strings.Repeat("b", 2<<20) + `"}}` + "\n"
 	os.WriteFile(main, append([]byte(other), b...), 0o644)
 	again, _ := claudecode.TailEvents(fixtureContext(sid), main, store)
-	if len(again.Events) != 4 {
-		t.Fatalf("%d events", len(again.Events))
+	if k := kindsOf(again.Events); k != "session.turn,session.turn,session.turn" {
+		t.Fatalf("events %s", k)
+	}
+}
+
+func kindsOf(events []any) string {
+	var ks []string
+	for _, e := range events {
+		b, _ := json.Marshal(e)
+		var m map[string]any
+		json.Unmarshal(b, &m)
+		ks = append(ks, fmt.Sprint(m["event_kind"]))
+	}
+	return strings.Join(ks, ",")
+}
+
+// Claude Code appends a pull request's link line again and again. Each pull
+// request is reported once per session, across hook runs and transcripts,
+// with the earliest time a copy was seen.
+// @spec: claude-code-transcript-parser#pr-link-once-per-session
+func TestPRLinkedOncePerSession(t *testing.T) {
+	main, sid := copyFixture(t, "testdata/fixtures/synthetic-2.1.310")
+	cursors := t.TempDir()
+	store := cursor.Open(cursors)
+	link := func(n int, at string) string {
+		return fmt.Sprintf(`{"type":"pr-link","timestamp":%q,"prNumber":%d,"prRepository":"neo-tax/harness-plugins","prUrl":"https://github.com/neo-tax/harness-plugins/pull/%d"}`+"\n", at, n, n)
+	}
+	appendLines := func(path string, lines ...string) {
+		os.MkdirAll(filepath.Dir(path), 0o755)
+		f, _ := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		for _, l := range lines {
+			f.WriteString(l)
+		}
+		f.Close()
+	}
+	appendLines(main, link(42, "2026-10-25T11:00:00Z"), link(43, "2026-10-25T11:00:01Z"), link(43, "2026-10-25T11:00:02Z"))
+	sub := filepath.Join(strings.TrimSuffix(main, ".jsonl"), "subagents", "agent-sub9.jsonl")
+	appendLines(sub, link(44, "2026-10-25T11:00:03Z"), link(44, "2026-10-25T10:59:00Z"))
+	r, err := claudecode.TailEvents(fixtureContext(sid), main, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Commit()
+	got := map[float64]string{}
+	for _, e := range toLines(t, r.Events) {
+		if e["event_kind"] == "session.pr_linked" {
+			n := e["number"].(float64)
+			if _, dup := got[n]; dup {
+				t.Fatalf("pull request %v reported twice", n)
+			}
+			got[n] = e["first_seen_at"].(string)
+		}
+	}
+	want := map[float64]string{42: "2026-10-25T10:00:10Z", 43: "2026-10-25T11:00:01Z", 44: "2026-10-25T10:59:00Z"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("links %v, want %v", got, want)
+	}
+	appendLines(main, link(42, "2026-10-25T12:00:00Z"), link(45, "2026-10-25T12:00:01Z"))
+	r, _ = claudecode.TailEvents(fixtureContext(sid), main, store)
+	r.Commit()
+	if k := kindsOf(r.Events); k != "session.pr_linked" {
+		t.Fatalf("next hook sent %s", k)
+	}
+	if e := toLines(t, r.Events)[0]; e["number"] != float64(45) {
+		t.Fatalf("next hook sent %v", e)
+	}
+	b, _ := os.ReadFile(filepath.Join(cursors, "cursors.json"))
+	if strings.Contains(string(b), "harness-plugins") {
+		t.Fatalf("cursor file names a repository: %s", b)
 	}
 }

@@ -6,7 +6,7 @@ The neo-tax plugin reports metadata about AI coding sessions so Neo.Tax can attr
 
 ## Identity
 
-Neo.Tax receives two values meant to identify the engineer: the email the engineer confirms at enrollment, which is stored with the device's key rather than sent with each event, and the git `user.email` in effect for the repository on `session.opened`, used only to join sessions to pull-request authors.
+Neo.Tax receives one value meant to identify the engineer: the email the engineer confirms at enrollment, which is stored with the device's key rather than sent with each event. Events carry the device id, and Neo.Tax knows which engineer enrolled the device.
 
 Three other values are not meant to identify anyone but can. `branch` is free text the engineer or their tools choose, so it can contain a name, a username, or anything else typed into it. `repo.owner` is the account that owns the repository, which is a personal username when the repository lives under a personal account rather than an organization. The device hostname, sent once at enrollment as a readable name for the device, often contains the engineer's name.
 
@@ -60,10 +60,9 @@ Prompt text, completion text, tool inputs, tool outputs, file paths, the working
 | `repo.name` | Repository name. |
 | `branch` | Current git branch name; null on a detached HEAD or outside git. |
 | `head_sha` | Commit hash HEAD pointed at. |
-| `git_user_email` | The git user.email in effect for the repository (its own config, else the engineer's global git config), used only to join sessions to pull-request authors. |
 | `dropped_events` | How many events the agent discarded because its local queue was full. |
 
-### `session.pr_opened`
+### `session.pr_linked`
 
 | Field | Contents |
 | --- | --- |
@@ -80,7 +79,7 @@ Prompt text, completion text, tool inputs, tool outputs, file paths, the working
 | `repo.owner` | Organization or user that owns the repository. |
 | `repo.name` | Repository name. |
 | `number` | Pull request number. |
-| `timestamp` | When the pull request was recorded as opened. |
+| `first_seen_at` | When the session's transcript first recorded the link to the pull request. |
 
 ### `session.turn`
 
@@ -108,6 +107,7 @@ Prompt text, completion text, tool inputs, tool outputs, file paths, the working
 | `usage.cache_write_1h` | Input tokens written to the one-hour prompt cache. |
 | `usage.cache_read` | Input tokens read from the prompt cache. |
 | `usage.service_tier` | Vendor service tier the request ran on. |
+| `usage.speed` | Speed the request ran at, standard or fast, which sets its price per token. |
 | `usage.source` | Where the counts came from: payload, transcript, or unknown. |
 
 ## At enrollment
