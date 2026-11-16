@@ -146,9 +146,10 @@ func emit(a *agent.Agent, name string, p payload, o HookOptions) error {
 	// emitted, carrying no count. A skipped Stop or PreCompact tail is read
 	// by the session's next hook; SessionEnd has no next hook, so it waits
 	// three times as long, and a tail it still skips is recovered only by a
-	// backfill. The long wait is safe because the hook is async: Claude Code
-	// cancels a synchronous SessionEnd hook after 1.5 seconds, but lets an
-	// async one run to completion after it exits.
+	// backfill run with --restart. The long wait relies on the hook being
+	// async: Claude Code cancels a synchronous SessionEnd hook after 1.5
+	// seconds, and an async one ran to completion after it exited in our
+	// probes, though its docs say claude -p may kill one at teardown.
 	store := cursor.Open(o.DataDir)
 	wait := CursorWait
 	if name == "SessionEnd" {

@@ -106,11 +106,11 @@ func TestSecondBackfillExits(t *testing.T) {
 	}
 }
 
-// Re-running resets every cursor and resends; the server's idempotency key
-// discards what it already has.
+// A --restart run resets every cursor and resends every session; the
+// server's idempotency key discards what it already has.
 // @spec: event-queue-and-backfill#backfill-command
 // @spec: event-queue-and-backfill#backfill-idempotent-server-side
-func TestRerunResetsCursorsAndResends(t *testing.T) {
+func TestRestartResetsCursorsAndResends(t *testing.T) {
 	h := newHookEnv(t, true)
 	root := projects(t, h.repo)
 	h.backfill(root)
@@ -119,9 +119,16 @@ func TestRerunResetsCursorsAndResends(t *testing.T) {
 	if c := cursor.Open(h.data).Get(main); c.Offset == 0 {
 		t.Fatal("cursor not advanced by backfill")
 	}
-	h.backfill(root)
+	var out bytes.Buffer
+	err := claudecode.Backfill(context.Background(), claudecode.BackfillOptions{
+		DataDir: h.data, ConfigDir: root, AgentVersion: "0.1.0", Now: func() time.Time { return h.now },
+		HTTP: &http.Client{Timeout: 5 * time.Second}, Out: &out, Restart: true,
+	})
+	if err != nil || !strings.Contains(out.String(), "Backfilled 2 sessions") {
+		t.Fatalf("restart did not resend: %q %v", out.String(), err)
+	}
 	if got := len(h.recorded()); got != first {
-		t.Fatalf("recorded %d after rerun, want %d (duplicates discarded)", got, first)
+		t.Fatalf("recorded %d after restart, want %d (duplicates discarded)", got, first)
 	}
 }
 
