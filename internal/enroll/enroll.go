@@ -28,8 +28,9 @@ import (
 // DeviceFile holds the device id and key inside the plugin data directory.
 const DeviceFile = "device.json"
 
-// DefaultServer is Neo.Tax's enrollment endpoint base URL.
-const DefaultServer = "https://app.neo.tax"
+// DefaultServer is the base URL of Neo.Tax's enrollment endpoint, under which the agent posts
+// /v1/enroll. The response names the ingest base URL, so only enrollment depends on it.
+const DefaultServer = "https://api.neo.tax/harness"
 
 var (
 	// ErrNotEnrolled means no device key is stored.
