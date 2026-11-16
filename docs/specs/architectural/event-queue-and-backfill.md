@@ -4,8 +4,8 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-10-24
-updated: 2026-11-14
-version: 4
+updated: 2026-11-15
+version: 5
 affects:
   - internal/queue/*.go
   - internal/ingest/*.go
@@ -42,6 +42,7 @@ Governs how the agent stores session events on disk between hooks, flushes them 
 - `flush-lock`(tested): A single lock file serializes flushes; a hook that cannot acquire it exits without flushing and leaves its events for the next hook.
 - `backfill-scope`(tested): A backfill enumerates every transcript on disk for the harness and emits events for each from the beginning, newest transcript first.
 - `backfill-session-id-from-harness`(tested): A backfill reads only transcripts whose file name has the shape of the harness's session id (for Claude Code, a lowercase UUID), and uses that name as the session id. Any other file under the harness's transcript directory is skipped, so a file name the engineer chose never reaches an event.
+- `backfill-skips-fork-copies`(tested): A backfill sends a fork's copies of its parent's turns and pull request links once, under the parent, and opens the fork with `source` fork. Transcripts that share their first line's uuid are a fork family; within one, a transcript all of whose line uuids another has comes first, then the one whose first timestamped line is earlier, and each later transcript's lines whose uuids an earlier one has are copies. Side usage still subtracts the copied turns, as at `SessionEnd`.
 - `backfill-after-login`(tested): An interactive enrollment starts a backfill immediately after the device key is stored.
 - `backfill-lock`(tested): A backfill holds a lock so that two backfills cannot run at once; a second request exits.
 - `backfill-command`(tested): The agent exposes a backfill command, reachable through the harness's `neo-tax:backfill` entry point. When the last backfill paused or was killed after recording a resume point, the command resumes it; otherwise, or when run with `--restart`, it resets every cursor and re-runs the backfill from the newest transcript.
@@ -70,6 +71,7 @@ The random 0–30 minute delay before backfill belongs to managed enrollment, wh
 
 ## Risks
 
+- **Forks are inferred.** Claude Code marks neither a fork nor its copied lines, so a backfill infers both from shared line uuids. On one engineer's 264 transcripts this found 3 forks, matched each to the parent created first, and left no turn sent under two sessions (36 before). A fork whose parent's transcript is gone, or whose first line was compacted away, is not found; its copies then go out under the fork, and the server's turn key still keeps the usage from counting twice. When a parent went on after the fork and the fork lacks its own start lines, the order falls back to the file path.
 - **A long backfill under the hook's time budget.** The harness may kill a hook that runs too long. Mitigated by backfill running under its own command after login, not under a hook, and by a paused backfill resuming from its recorded point.
 - **A resume point counted at a shared modification time.** If a transcript the paused run queued at the boundary time is modified before the resume, the count at the boundary now covers one transcript it did not queue, which the resume skips. This needs two transcripts with the same modification time to the nanosecond and a write to one of them in between; accepted, and `--restart` recovers it.
 - **A backfill process lives up to six hours.** Waiting out backoff keeps the detached process alive for as long as the wait budget. It is still one command's run, so `no-daemon` holds, but an engineer or a security reviewer may notice a process that outlives the login by hours; the budget is kept to six so an outage longer than that pauses the backfill for a later run to resume, rather than keeping it alive; it sleeps rather than polls and holds only the backfill lock, so a second backfill exits instead of piling up.

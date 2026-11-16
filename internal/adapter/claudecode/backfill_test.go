@@ -610,3 +610,58 @@ func TestBackfillSkipsTranscriptsNotNamedBySessionID(t *testing.T) {
 		t.Errorf("output %q", out)
 	}
 }
+
+// A fork's transcript begins with copies of its parent's lines, uuids
+// included, and Claude Code marks neither. A backfill sends the copied turns
+// and pull request links once, under the parent, and opens the fork with
+// source fork. Covered both ways the parent is found: a parent that stopped
+// once forked, all of whose lines the fork has, and a parent that went on,
+// which the fork's later-timestamped start lines tell apart.
+// @spec: event-queue-and-backfill#backfill-skips-fork-copies
+func TestBackfillSendsAForksCopiedTurnsOnceUnderTheParent(t *testing.T) {
+	const parent, fork = "aaaaaaaa-0000-4000-8000-000000000001", "bbbbbbbb-0000-4000-8000-000000000002"
+	copied := `{"type":"user","uuid":"u1","timestamp":"2026-10-26T09:00:00Z","cwd":"REPO","version":"2.1.310","message":{"content":"x"}}
+{"type":"assistant","uuid":"a1","timestamp":"2026-10-26T09:00:01Z","version":"2.1.310","requestId":"req_1","message":{"id":"msg_1","model":"m","usage":{"input_tokens":1,"output_tokens":1}}}
+{"type":"pr-link","uuid":"p1","timestamp":"2026-10-26T09:00:02Z","prNumber":7,"prRepository":"o/r","prUrl":"https://github.com/o/r/pull/7"}
+`
+	own := func(id string, at string) string {
+		return `{"type":"assistant","uuid":"a-` + id + `","timestamp":"` + at + `","version":"2.1.310","requestId":"req_` + id + `","message":{"id":"msg_` + id + `","model":"m","usage":{"input_tokens":1,"output_tokens":1}}}` + "\n"
+	}
+	forkStart := `{"type":"queue-operation","operation":"enqueue","timestamp":"2026-10-26T10:00:00Z","sessionId":"` + fork + `"}` + "\n"
+	for name, c := range map[string]struct{ parent, fork string }{
+		"parent stopped": {copied, copied + own("F", "2026-10-26T10:00:05Z")},
+		"parent went on": {copied + own("P", "2026-10-26T10:30:00Z"), forkStart + copied + own("F", "2026-10-26T10:00:05Z")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHookEnv(t, true)
+			root := t.TempDir()
+			proj := filepath.Join(root, "projects", "-p")
+			os.MkdirAll(proj, 0o700)
+			os.WriteFile(filepath.Join(proj, parent+".jsonl"), []byte(strings.ReplaceAll(c.parent, "REPO", h.repo)), 0o600)
+			os.WriteFile(filepath.Join(proj, fork+".jsonl"), []byte(strings.ReplaceAll(c.fork, "REPO", h.repo)), 0o600)
+			if _, err := h.backfill(root); err != nil {
+				t.Fatal(err)
+			}
+			sessions := map[string][]string{}
+			for _, e := range h.recorded() {
+				sid := e["session_id"].(string)
+				switch e["event_kind"] {
+				case "session.turn":
+					sessions[sid] = append(sessions[sid], e["message_id"].(string))
+				case "session.pr_linked":
+					sessions[sid] = append(sessions[sid], "pr")
+				case "session.opened":
+					if want := map[string]any{parent: nil, fork: "fork"}[sid]; e["source"] != want {
+						t.Errorf("%s opened with source %v, want %v", sid, e["source"], want)
+					}
+				}
+			}
+			if got := strings.Join(sessions[parent], ","); !strings.HasPrefix(got, "msg_1,pr") {
+				t.Errorf("parent sent %s", got)
+			}
+			if got := strings.Join(sessions[fork], ","); got != "msg_F" {
+				t.Errorf("fork sent %s, want only its own turn", got)
+			}
+		})
+	}
+}

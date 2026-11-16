@@ -22,6 +22,8 @@ The code that runs on an engineer's machine to observe AI coding sessions and re
 
 **PR link**: A pull request a session touched, as the harness records it: opened, pushed to, or viewed from the session. A session links each pull request once, and one pull request can be linked to many sessions. _Avoid_: PR opened, PR event
 
+**Fork**: A new session a harness starts from an existing one, whose transcript begins with copies of the parent session's lines. The parent's turns and PR links stay the parent's. _Avoid_: branch (a git term here), clone
+
 **Subagent**: A child agent a harness spawns inside a session, with its own transcript and message ids but no session of its own. _Avoid_: sidechain, child session, sub-session _Avoid_: request, response, step
 
 **Usage**: The token counts and pricing attributes of one turn (input, output, cache write by TTL, cache read, service tier, speed), with a source of payload, transcript, or unknown. _Avoid_: cost, spend (those are dollars, computed server-side)

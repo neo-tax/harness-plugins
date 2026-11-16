@@ -30,6 +30,10 @@ type Context struct {
 	// Git is the working directory's identity at hook time; its branch is
 	// the fallback for turns whose line records none.
 	Git gitident.Identity
+	// copied, set by a backfill for a fork's main transcript, holds the line
+	// uuids Claude Code copied from the parent session's transcript; their
+	// turns and pull request links are the parent's.
+	copied map[string]bool
 }
 
 func (c Context) envelope(version string) contract.Envelope {
@@ -50,6 +54,7 @@ func (c Context) envelope(version string) contract.Envelope {
 // @spec: claude-code-transcript-parser#content-never-read-into-events
 type line struct {
 	Type         string    `json:"type"`
+	UUID         string    `json:"uuid"`
 	Timestamp    time.Time `json:"timestamp"`
 	Version      string    `json:"version"`
 	GitBranch    string    `json:"gitBranch"`
@@ -121,6 +126,8 @@ type tail struct {
 	events   []any
 	cursor   cursor.Cursor
 	failures int
+	// copiedTurns are the turns skipped as copies of a parent session's.
+	copiedTurns []any
 }
 
 // readTail reads a transcript from its cursor to the last complete line and
@@ -189,8 +196,12 @@ func readTail(ctx Context, path string, c cursor.Cursor, subagentID *string) (ta
 				continue
 			}
 			seen[id] = true
+			if ctx.copied[l.UUID] && l.UUID != "" {
+				out.copiedTurns = append(out.copiedTurns, ctx.turn(l, subagentID, out.cursor.Version))
+				continue
+			}
 			out.events = append(out.events, ctx.turn(l, subagentID, out.cursor.Version))
-		case l.Type == "pr-link" && l.PRNumber > 0 && !copiedFromParent(c, l):
+		case l.Type == "pr-link" && l.PRNumber > 0 && !copiedFromParent(c, l) && !(l.UUID != "" && ctx.copied[l.UUID]):
 			// @spec: claude-code-transcript-parser#pr-link-lines
 			out.events = append(out.events, contract.NewPRLinked(ctx.envelope(out.cursor.Version), contract.PRLinkedFields{
 				Repo: prRepo(l.PRRepository, l.PRURL), Number: l.PRNumber, FirstSeenAt: l.Timestamp.UTC(),
@@ -283,6 +294,9 @@ func subagentID(path string) string {
 // Result is what one read of a session's transcripts produced.
 type Result struct {
 	Events []any
+	// CopiedTurns are a fork's turns copied from its parent, which Events
+	// leaves out; a backfill still subtracts them from the session totals.
+	CopiedTurns []any
 	// ParseFailures counts lines that were not valid JSON, so a harness
 	// format change shows up in diagnostics.
 	ParseFailures int
@@ -323,6 +337,7 @@ func tailWith(ctx Context, mainPath string, cursors map[string]cursor.Cursor) (R
 			return
 		}
 		res.Events = append(res.Events, t.events...)
+		res.CopiedTurns = append(res.CopiedTurns, t.copiedTurns...)
 		res.ParseFailures += t.failures
 		moves[path] = t.cursor
 	}
