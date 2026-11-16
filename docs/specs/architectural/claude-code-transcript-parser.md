@@ -5,7 +5,7 @@ owner:
   - Firas Abuzaid
 created: 2026-10-24
 updated: 2026-11-14
-version: 5
+version: 7
 affects:
   - internal/adapter/claudecode/*.go
   - internal/cursor/*.go
@@ -29,6 +29,7 @@ Governs how the Claude Code adapter turns hook payloads and on-disk transcripts 
 - `usage-source-transcript`(tested): A turn whose counts came from the transcript carries `usage.source` as `transcript`.
 - `usage-unknown-when-absent`(tested): An assistant message with no usage block produces a turn with `usage.source` as `unknown` and null counts.
 - `request-id-from-transcript`(tested): A turn's `request_id` is the API request id the transcript records for that message, or null.
+- `message-id-is-provider-id`(tested): A turn's `message_id` is the provider's own id for the response as the transcript records it (for Anthropic, `msg_…`), unchanged, because Neo.Tax joins another source's record of the same API call to the turn on it.
 - `subagent-transcripts-scanned`(tested): On every hook that reads turns, the adapter also scans each subagent transcript under the session's subagents directory from its own cursor and emits those messages as turns of the parent session with the subagent's id.
 - `subagent-usage-counted`(tested): Subagent turns carry their own usage; they are never folded into a main-thread turn.
 - `pr-link-lines`(tested): A transcript line recording a pull request opened from the session produces one `session.pr_opened` event with the repository parsed from the recorded repository name and the recorded number.
@@ -64,6 +65,7 @@ Claude Code makes API calls that never become an assistant message in the transc
 - **The harness changes its transcript format.** Turns stop being parsed and sessions report `usage.source` unknown. Mitigated by fixtures per harness version and by the usage-unknown rate being a v0.1 exit criterion; the agent logs a parse failure with the harness version and never crashes the hook.
 - **A harness release starts canceling async `SessionEnd` hooks.** A hook canceled before its events are queued loses `session.closed` and the session's final tail. Detected by the server's rate of sessions without `session.closed` per harness version; the install smoke test can assert `session.closed` arrives after the harness exits.
 - **A session with no `SessionEnd`.** The harness was killed and no `session.closed` arrives. Accepted; the server treats a session as closed after inactivity. Its side usage is lost as well, since Claude Code writes `cost-state` only on a clean exit.
+- **Transcript saving is off.** Claude Code then writes no transcript, so the adapter emits the session's opens and closes but no turns; a session launched from inside another Claude Code session inherits a marker that turns saving off. Detectable as sessions with no turns; the OTLP path (`otlp-ingest`) still reports their calls.
 - **`cost-state` changes or disappears.** `side_usage` turns null and side calls go uncounted again. Detectable: the server can watch the null rate per harness version, and `scripts/dev.sh audit` re-measures against the API.
 
 ## Open Questions

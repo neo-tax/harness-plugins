@@ -5,7 +5,7 @@ owner:
   - Firas Abuzaid
 created: 2026-10-24
 updated: 2026-11-14
-version: 6
+version: 7
 affects:
   - contract/*.schema.json
   - contract/*.go
@@ -18,6 +18,8 @@ affects:
 # Session event wire contract
 
 Governs every request and response exchanged between the agent and Neo.Tax: the session event envelope, the four event kinds, the batched ingest request and its response, and the enrollment exchange. The contract is owned by this repository as JSON Schema.
+
+The plugin's ingest endpoint is one of Neo.Tax's two entry points into the session record. The other, governed by `otlp-ingest`, takes a harness's own OpenTelemetry export and does not use this contract; the two meet on the turn's request id.
 
 ## Requirements
 
@@ -67,7 +69,7 @@ The contract carries one event per assistant message rather than a cumulative pe
 
 `email_confirmed_by` is in the enrollment request from the first version even though v0.1 only ever sends `engineer`, so managed enrollment in v1.0 adds no server-side change.
 
-Harness-specific identifiers (`session_id`, `message_id`, `request_id`, `subagent_id`) are passed through as the harness produced them; the contract does not normalize them beyond requiring strings.
+Harness-specific identifiers (`session_id`, `message_id`, `request_id`, `subagent_id`) are passed through as the harness produced them; the contract does not normalize them beyond requiring strings. The message id and request id are held to that most strictly (`claude-code-transcript-parser#message-id-is-provider-id`, `claude-code-transcript-parser#request-id-from-transcript`), because they are the model provider's own ids for the API call, which telemetry and gateways also carry: the server joins a turn from this contract with another source's record of the same call on them (`otlp-ingest#call-ids`), so a normalized or synthesized value would split one turn into two.
 
 ## Risks
 

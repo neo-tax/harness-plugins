@@ -101,6 +101,7 @@ func readExpected(t *testing.T, path string) []map[string]any {
 // @spec: claude-code-transcript-parser#usage-source-transcript
 // @spec: claude-code-transcript-parser#usage-unknown-when-absent
 // @spec: claude-code-transcript-parser#request-id-from-transcript
+// @spec: claude-code-transcript-parser#message-id-is-provider-id
 // @spec: claude-code-transcript-parser#subagent-transcripts-scanned
 // @spec: claude-code-transcript-parser#subagent-usage-counted
 // @spec: claude-code-transcript-parser#pr-link-lines
