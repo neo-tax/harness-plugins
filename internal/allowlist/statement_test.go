@@ -92,6 +92,7 @@ func TestStatementNamesIdentityLine(t *testing.T) {
 		"repository-level git `user.email`",
 		"`branch` is free text the engineer or their tools choose",
 		"`repo.owner` is the account that owns the repository, which is a personal username",
+		"The device hostname, sent once at enrollment",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("statement lacks %q", want)

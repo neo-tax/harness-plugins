@@ -8,7 +8,7 @@ The neo-tax plugin reports metadata about AI coding sessions so Neo.Tax can attr
 
 Neo.Tax receives two values meant to identify the engineer: the email the engineer confirms at enrollment, which is stored with the device's key rather than sent with each event, and the repository-level git `user.email` on `session.opened`, used only to join sessions to pull-request authors.
 
-Two other fields are not meant to identify anyone but can. `branch` is free text the engineer or their tools choose, so it can contain a name, a username, or anything else typed into it. `repo.owner` is the account that owns the repository, which is a personal username when the repository lives under a personal account rather than an organization.
+Three other values are not meant to identify anyone but can. `branch` is free text the engineer or their tools choose, so it can contain a name, a username, or anything else typed into it. `repo.owner` is the account that owns the repository, which is a personal username when the repository lives under a personal account rather than an organization. The device hostname, sent once at enrollment as a readable name for the device, often contains the engineer's name.
 
 ## Never sent
 
@@ -102,3 +102,21 @@ Prompt text, completion text, tool inputs, tool outputs, file paths, the working
 | `usage.cache_read` | Input tokens read from the prompt cache. |
 | `usage.service_tier` | Vendor service tier the request ran on. |
 | `usage.source` | Where the counts came from: payload, transcript, or unknown. |
+
+## At enrollment
+
+Enrollment sends one request, when the engineer runs `neo-tax:login`. That happens once per device, and again only if the device has to enroll again, for example after its device key is rejected. This request is separate from session events; its email and hostname are never sent with a session event. The list is generated from the enrollment request in the wire contract.
+
+| Field | Contents |
+| --- | --- |
+| `contract_version` | Version of the wire contract the request conforms to. |
+| `enrollment_token` | The enrollment token the engineer's Neo.Tax admin issued; it can only enroll devices. |
+| `email` | The email the engineer confirms at login, stored with the device key. |
+| `email_confirmed_by` | Who confirmed the email: engineer when the engineer typed or chose it at login. |
+| `device` | The machine and harness being enrolled. |
+| `device.hostname` | The machine's hostname as the operating system reports it at enrollment, recorded as a readable name for the device id so engineers can tell their devices apart. It often contains the engineer's name. It is not updated if the hostname changes later; enrolling again sends the current hostname under a new device id. |
+| `device.os` | Operating system, for example darwin or linux. |
+| `device.arch` | CPU architecture, for example arm64 or amd64. |
+| `device.harness` | Which coding harness the device is enrolled for, for example claude-code. |
+| `device.harness_version` | Version of the harness; null when unknown. |
+| `device.agent_version` | Version of the neo-tax-agent binary. |
