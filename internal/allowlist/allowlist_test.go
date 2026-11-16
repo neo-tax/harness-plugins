@@ -67,6 +67,7 @@ func checkChildren(t *testing.T, kind, path string, f allowlist.Field) {
 }
 
 // @spec: field-allowlist#cwd-excluded
+// @spec: repo-and-branch-identity#cwd-never-sent
 // @spec: field-allowlist#title-excluded
 // @spec: field-allowlist#content-excluded
 func TestNoContentBearingFieldIsAllowed(t *testing.T) {
