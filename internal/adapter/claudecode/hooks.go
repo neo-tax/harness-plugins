@@ -130,7 +130,13 @@ func emit(a *agent.Agent, name string, p payload, o HookOptions) error {
 	var side []contract.SideUsage
 	if name == "SessionEnd" {
 		var err error
-		if side, err = sideUsage(ctx, p.TranscriptPath, p.Reason); err != nil {
+		// Only an exit writes cost-state; on /clear, logout, or /resume none
+		// is coming, so the totals are read once without waiting.
+		var wait time.Duration
+		if exitReasons[p.Reason] {
+			wait = CostStateWait
+		}
+		if side, err = sideUsage(ctx, p.TranscriptPath, wait); err != nil {
 			agent.Logf(o.DataDir, "hook=%s side usage unavailable: %s", name, errClass(err))
 		}
 	}

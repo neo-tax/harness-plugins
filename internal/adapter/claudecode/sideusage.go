@@ -157,7 +157,8 @@ func (s *totalsScan) totals() map[string]modelTotals {
 	totals := map[string]modelTotals{}
 	for _, c := range s.tallies {
 		for model, m := range c.ModelUsage {
-			totals[model] = totals[model].add(m.counts())
+			k := modelKey(model)
+			totals[k] = totals[k].add(m.counts())
 		}
 	}
 	return totals
@@ -166,19 +167,15 @@ func (s *totalsScan) totals() map[string]modelTotals {
 // sideUsage is the usage of the session's API calls that produced no turn:
 // its totals less every turn of the session, per model and count, clamped at
 // zero so a harness that under-records never yields negative usage. It is
-// nil when no current totals appear within CostStateWait (at once, when
-// reason is not an exit), or when the
+// nil when no current totals appear within wait, or when the
 // transcripts could not all be read, since subtracting a partial set of
 // turns would over-report.
 //
 // @spec: claude-code-transcript-parser#session-totals-from-cost-state
 // @spec: claude-code-transcript-parser#side-usage-is-totals-minus-turns
 // @spec: claude-code-transcript-parser#side-usage-null-without-totals
-func sideUsage(ctx Context, mainPath, reason string) ([]contract.SideUsage, error) {
-	deadline := time.Now()
-	if exitReasons[reason] {
-		deadline = deadline.Add(CostStateWait)
-	}
+func sideUsage(ctx Context, mainPath string, wait time.Duration) ([]contract.SideUsage, error) {
+	deadline := time.Now().Add(wait)
 	scan := &totalsScan{path: mainPath, tallies: map[int64]costState{}}
 	err := scan.advance()
 	for err == nil && !scan.current && time.Now().Before(deadline) {
@@ -188,17 +185,29 @@ func sideUsage(ctx Context, mainPath, reason string) ([]contract.SideUsage, erro
 	if err != nil || !scan.current {
 		return nil, err
 	}
-	totals := map[string]modelTotals{}
-	for model, t := range scan.totals() {
-		k := modelKey(model)
-		totals[k] = totals[k].add(t)
-	}
 	res, _, err := tailWith(ctx, mainPath, nil)
 	if err != nil {
 		return nil, err
 	}
+	return lessTurns(scan.totals(), res.Events), nil
+}
+
+// currentTotals is the session's totals when its transcript ends with
+// current ones, without waiting; ok is false otherwise.
+func currentTotals(mainPath string) (map[string]modelTotals, bool) {
+	scan := &totalsScan{path: mainPath, tallies: map[int64]costState{}}
+	if scan.advance() != nil || !scan.current {
+		return nil, false
+	}
+	return scan.totals(), true
+}
+
+// lessTurns is totals less the usage of the given events' turns, per model
+// and count, clamped at zero, with all-zero models left out. It is nil
+// (unknown) when totals and turns name a model differently.
+func lessTurns(totals map[string]modelTotals, events []any) []contract.SideUsage {
 	turns := map[string]contract.SideUsage{}
-	for _, ev := range res.Events {
+	for _, ev := range events {
 		t, ok := ev.(contract.Turn)
 		if !ok || t.Model == nil {
 			continue
@@ -207,7 +216,7 @@ func sideUsage(ctx Context, mainPath, reason string) ([]contract.SideUsage, erro
 		turns[k] = add(turns[k], turnCounts(t.Usage))
 	}
 	if !joined(totals, turns) {
-		return nil, nil
+		return nil
 	}
 	out := []contract.SideUsage{}
 	for model, total := range totals {
@@ -218,7 +227,7 @@ func sideUsage(ctx Context, mainPath, reason string) ([]contract.SideUsage, erro
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Model < out[j].Model })
-	return out, nil
+	return out
 }
 
 // modelKey is a model name without a trailing bracketed suffix. Claude Code
@@ -258,6 +267,32 @@ func joined(totals map[string]modelTotals, turns map[string]contract.SideUsage) 
 		}
 	}
 	return true
+}
+
+// latestTimestamp is the latest timestamp any line of a transcript records.
+func latestTimestamp(path string) (time.Time, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer f.Close()
+	var latest time.Time
+	r := bufio.NewReaderSize(f, 256<<10)
+	for {
+		raw, err := r.ReadBytes('\n')
+		if err == io.EOF {
+			return latest, nil
+		}
+		if err != nil {
+			return time.Time{}, err
+		}
+		var l struct {
+			Timestamp time.Time `json:"timestamp"`
+		}
+		if json.Unmarshal(raw, &l) == nil && l.Timestamp.After(latest) {
+			latest = l.Timestamp
+		}
+	}
 }
 
 func add(a, b contract.SideUsage) contract.SideUsage {

@@ -543,10 +543,43 @@ func backfillOne(a *agent.Agent, path, deviceID string, o BackfillOptions) (int,
 		GitUserEmail: git.UserEmail,
 	})
 	events := append([]any{opened}, res.Events...)
+	// The close carries the version the session ended on, as SessionEnd's
+	// does; the read's cursor holds the last one the transcript recorded.
+	endVersion := start.Version
+	if v := moves[path].Version; v != "" {
+		endVersion = v
+	}
+	if c, ok := backfillClose(ctx, path, endVersion, res.Events, err); ok {
+		events = append(events, c)
+	}
 	if err := a.Emit(events...); err != nil {
 		return 0, nil, err
 	}
 	return len(events), moves, nil
+}
+
+// backfillClose is a past session's session.closed, when its transcript
+// ends with current session totals: a clean exit. It carries the side usage
+// no turn reports, computed from the session's turns as read, and is
+// timestamped from the transcript so a re-run sends the same event. A read
+// that failed for any of the session's transcripts left turns out, and
+// subtracting too few would over-report, so it gets no close.
+//
+// @spec: event-queue-and-backfill#backfill-closes-ended-sessions
+func backfillClose(ctx Context, path, version string, turns []any, readErr error) (contract.Closed, bool) {
+	if readErr != nil {
+		return contract.Closed{}, false
+	}
+	totals, ok := currentTotals(path)
+	if !ok {
+		return contract.Closed{}, false
+	}
+	side := lessTurns(totals, turns)
+	ended, err := latestTimestamp(path)
+	if err != nil || ended.IsZero() {
+		return contract.Closed{}, false
+	}
+	return contract.NewClosed(ctx.envelope(version), contract.ClosedFields{EndedAt: ended.UTC(), SideUsage: side}), true
 }
 
 func sessionIDOf(path string) string {
