@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://neo.tax/contract/ingest-response.schema.json",
+  "title": "Ingest response",
+  "description": "The server's account of a batch: how many events were accepted, how many were duplicates, and which were rejected for schema reasons.",
+  "type": "object",
+  "required": ["accepted", "duplicates", "rejected"],
+  "properties": {
+    "accepted": { "type": "integer", "minimum": 0 },
+    "duplicates": { "type": "integer", "minimum": 0 },
+    "rejected": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["index", "reason"],
+        "properties": {
+          "index": { "type": "integer", "minimum": 0 },
+          "reason": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "error": {
+      "description": "Body of a non-2xx response from the ingest or enrollment endpoint. A contract_version rejection names the versions the server accepts.",
+      "type": "object",
+      "required": ["error"],
+      "properties": {
+        "error": { "type": "string", "minLength": 1 },
+        "accepted_versions": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

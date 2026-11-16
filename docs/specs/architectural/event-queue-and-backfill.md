@@ -29,7 +29,7 @@ Governs how the agent stores session events on disk between hooks, flushes them 
 - `auth-rejection-stops-flushing`(approved): A 401 or 403 marks the device as needing re-enrollment; events keep queuing, and no flush is attempted until enrollment succeeds.
 - `server-and-network-errors-back-off`(approved): A 5xx response or a network error triggers backoff and leaves the batch in place.
 - `queue-cap`(approved): The queue is capped at 50 MB; when exceeded, the oldest segment is deleted.
-- `dropped-events-reported`(approved): The number of events deleted by the cap is counted and carried as `dropped_events` on the next `session.opened` event, then reset.
+- `dropped-events-reported`(approved): The number of events deleted by the cap is counted and carried as `dropped_events` on the next `session.opened` or `session.closed` event, then reset.
 - `flush-lock`(approved): A single lock file serializes flushes; a hook that cannot acquire it exits without flushing and leaves its events for the next hook.
 - `backfill-scope`(approved): A backfill enumerates every transcript on disk for the harness and emits events for each from the beginning, newest transcript first.
 - `backfill-after-login`(approved): An interactive enrollment starts a backfill immediately after the device key is stored.
