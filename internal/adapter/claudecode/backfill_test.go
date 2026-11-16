@@ -665,3 +665,28 @@ func TestBackfillSendsAForksCopiedTurnsOnceUnderTheParent(t *testing.T) {
 		})
 	}
 }
+
+// A backfill reads only the transcripts the agent has not read: a re-login
+// sends the sessions it has not seen, not the whole history again. Restart
+// reads everything again.
+// @spec: event-queue-and-backfill#backfill-skips-read-transcripts
+func TestBackfillSkipsTranscriptsAlreadyRead(t *testing.T) {
+	h := newHookEnv(t, true)
+	root := projects(t, h.repo)
+	if out, err := h.backfill(root); err != nil || !strings.Contains(out, "Backfilled 2 sessions") {
+		t.Fatalf("first: %q %v", out, err)
+	}
+	src, _ := os.ReadFile(filepath.Join(root, "projects", "-some-project", "22222222-2222-4222-8222-222222222222.jsonl"))
+	os.WriteFile(filepath.Join(root, "projects", "-some-project", "44444444-4444-4444-8444-444444444444.jsonl"), src, 0o600)
+	if out, err := h.backfill(root); err != nil || !strings.Contains(out, "Backfilled 1 sessions") {
+		t.Fatalf("second: %q %v", out, err)
+	}
+	var out bytes.Buffer
+	err := claudecode.Backfill(context.Background(), claudecode.BackfillOptions{
+		DataDir: h.data, ConfigDir: root, AgentVersion: "0.1.0", Now: func() time.Time { return h.now },
+		HTTP: &http.Client{Timeout: 5 * time.Second}, Out: &out, Restart: true,
+	})
+	if err != nil || !strings.Contains(out.String(), "Backfilled 3 sessions") {
+		t.Fatalf("restart: %q %v", out.String(), err)
+	}
+}

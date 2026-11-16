@@ -92,11 +92,14 @@ const (
 	waitCanceled
 )
 
-// Backfill emits events for every Claude Code transcript on disk, newest
-// first, from the beginning, flushing as it goes. A full run resets every
-// cursor first; a run that follows a paused one resumes after the
-// transcripts the paused run queued, unless o.Restart is set. It runs as its
-// own command, never under a hook.
+// Backfill emits events for every Claude Code transcript on disk that the
+// agent has not read, newest first, from the beginning, flushing as it
+// goes. A transcript with a cursor was read by a hook or an earlier
+// backfill, which queued its events, so it is skipped and its cursor kept;
+// o.Restart resets every cursor and reads every transcript again. A run
+// that follows a paused one resumes after the transcripts the paused run
+// queued, unless o.Restart is set. It runs as its own command, never under
+// a hook.
 //
 // @spec: event-queue-and-backfill#backfill-scope
 // @spec: event-queue-and-backfill#backfill-lock
@@ -195,16 +198,14 @@ func Backfill(ctx context.Context, o BackfillOptions) error {
 	}
 	status := BackfillStatus{StartedAt: o.Now().UTC(), Resume: resume}
 	store := cursor.Open(o.DataDir)
-	if resume == nil {
+	if o.Restart {
 		if err := withCursorLock(store, store.Reset); err != nil {
 			return err
 		}
-	} else {
-		// Cursors are left alone: the transcripts already queued keep the
-		// cursors the paused run recorded, and the ones after the resume
-		// point have had none since the paused run reset them, unless a
-		// hook has read them since, which also moved them past the resume
-		// point.
+	} else if resume != nil {
+		// The transcripts already queued keep the cursors the paused run
+		// recorded; the ones after the resume point are read unless a hook
+		// has read them since.
 		status.Sessions, status.Events = prev.Sessions, prev.Events
 		fmt.Fprintln(o.Out, "Resuming the paused backfill.")
 	}
@@ -216,6 +217,10 @@ func Backfill(ctx context.Context, o BackfillOptions) error {
 	forks := findForks(transcripts)
 	if resume != nil {
 		transcripts = after(transcripts, *resume)
+	}
+	// @spec: event-queue-and-backfill#backfill-skips-read-transcripts
+	if !o.Restart {
+		transcripts = unread(transcripts, store.All())
 	}
 	sessions, events := status.Sessions, status.Events
 	// Cursors were reset, or the transcripts left have none, so transcripts
@@ -724,4 +729,17 @@ func lineUUIDs(path string) map[string]bool {
 			return out
 		}
 	}
+}
+
+// unread is the transcripts with no cursor: those no hook or earlier
+// backfill has read. A session's subagent transcripts are read with its
+// main one, so the main transcript's cursor decides.
+func unread(ts []transcript, cursors map[string]cursor.Cursor) []transcript {
+	var out []transcript
+	for _, t := range ts {
+		if _, ok := cursors[t.path]; !ok {
+			out = append(out, t)
+		}
+	}
+	return out
 }

@@ -36,8 +36,8 @@ const usage = `usage: neo-tax-agent <command> [flags]
 commands:
   hook <name>  handle a harness hook; the payload is read from standard input
   login        enroll this device with an enrollment token, then start a backfill
-  backfill     resend events for every transcript on disk, continuing a paused
-               backfill where it stopped (--restart starts over from the newest)
+  backfill     send events for transcripts not yet read, continuing a paused
+               backfill where it stopped (--restart resends every transcript)
   version    print the agent version
 `
 

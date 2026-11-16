@@ -56,7 +56,7 @@ The code that runs on an engineer's machine to observe AI coding sessions and re
 
 **Dead letter**: A session event the server rejected for schema reasons, set aside on disk with the server's reason instead of being retried.
 
-**Backfill**: A run of the agent that resets every cursor and emits events for every transcript already on disk, newest first. _Avoid_: import, sync, replay
+**Backfill**: A run of the agent that emits events for every transcript on disk it has not already read, newest first; with `--restart` it resets every cursor and reads them all. _Avoid_: import, sync, replay
 
 **Launcher**: The script a plugin ships in place of the agent binary; it finds or downloads the agent for the plugin's version and execs it. _Avoid_: wrapper, shim
 
