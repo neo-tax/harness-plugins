@@ -95,6 +95,7 @@ func readExpected(t *testing.T, path string) []map[string]any {
 // Every fixture's transcript must produce exactly its expected event stream.
 // @spec: claude-code-transcript-parser#fixture-driven
 // @spec: test-and-release#fixture-pairs-expected-stream
+// @spec: test-and-release#contract-test
 // @spec: claude-code-transcript-parser#dedupe-by-message-id
 // @spec: claude-code-transcript-parser#usage-mapping
 // @spec: claude-code-transcript-parser#usage-source-transcript

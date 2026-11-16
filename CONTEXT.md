@@ -34,6 +34,16 @@ The code that runs on an engineer's machine to observe AI coding sessions and re
 
 **Wire contract**: The JSON Schema definitions of every request and response between the agent and Neo.Tax, owned by this repo and versioned by `contract_version`. _Avoid_: API, protocol, payload format
 
+**Cursor**: The agent's record, per transcript, of how far it has read and the last message it emitted, so each hook reads only the new tail.
+
+**Dead letter**: A session event the server rejected for schema reasons, set aside on disk with the server's reason instead of being retried.
+
+**Backfill**: A run of the agent that resets every cursor and emits events for every transcript already on disk, newest first. _Avoid_: import, sync, replay
+
+**Launcher**: The script a plugin ships in place of the agent binary; it finds or downloads the agent for the plugin's version and execs it. _Avoid_: wrapper, shim
+
+**Fixture**: An anonymized transcript paired with the exact event stream the parser must produce from it.
+
 **Fake ingest**: The shipped stand-in server that accepts the wire contract, validates it, and records what it receives, for tests, dogfooding, and security review.
 
 ## Relationships

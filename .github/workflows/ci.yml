@@ -5,15 +5,73 @@ on:
     branches: [main]
   pull_request:
 
+# @spec: test-and-release#workflow-token-least-privilege
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-      - run: go vet ./...
-      - run: go test -race ./...
       - name: gofmt
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go vet ./...
+      # Includes the contract test, the parser fixtures, the end-to-end tests
+      # against the fake ingest server, the spec traceability checks, and the
+      # check that PRIVACY.md matches the statement generated from the
+      # allowlist.
+      - run: go test -race ./...
+      - name: Cross-compile release targets
+        run: |
+          for t in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64; do
+            GOOS=${t%/*} GOARCH=${t#*/} CGO_ENABLED=0 go build -o /dev/null ./cmd/neo-tax-agent ./cmd/fake-ingest
+          done
+
+  # @spec: test-and-release#plugin-validate-in-ci
+  plugin_validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - run: npm install -g @anthropic-ai/claude-code@2.1.325
+      - run: claude plugin validate .
+      - name: Validate every plugin directory
+        run: for d in plugins/*/; do claude plugin validate "$d"; done
+
+  # @spec: test-and-release#install-smoke-test
+  # Not required until it has been stable for a release cycle; it needs the
+  # ANTHROPIC_API_KEY secret and is skipped where that is absent (forks).
+  install_smoke:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - run: npm install -g @anthropic-ai/claude-code@2.1.325
+      # The key reaches only this step, not the package install before it.
+      - name: Install smoke test
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "no ANTHROPIC_API_KEY (fork); skipped"
+            exit 0
+          fi
+          ./scripts/smoke-test.sh

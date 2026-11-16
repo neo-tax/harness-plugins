@@ -25,7 +25,8 @@ import (
 	"github.com/neo-tax/harness-plugins/internal/enroll"
 )
 
-// Version is set at release time with -ldflags "-X main.Version=v1.2.3".
+// Version is set at release time with -ldflags "-X main.Version=1.2.3", the
+// tag without its leading v, matching the plugin manifest's version.
 var Version = "dev"
 
 const usage = `usage: neo-tax-agent <command> [flags]

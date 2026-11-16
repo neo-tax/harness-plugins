@@ -97,7 +97,4 @@ func TestManifestsNameThePluginNeoTax(t *testing.T) {
 	if p.Name != "neo-tax" || m.Name != "neo-tax" || len(m.Plugins) != 1 || m.Plugins[0].Name != "neo-tax" {
 		t.Fatalf("plugin %q marketplace %q %+v", p.Name, m.Name, m.Plugins)
 	}
-	if m.Plugins[0].Version != p.Version {
-		t.Fatalf("versions differ: %s vs %s", m.Plugins[0].Version, p.Version)
-	}
 }

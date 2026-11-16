@@ -1,0 +1,281 @@
+# The only workflow that publishes a release: it runs when a semantic-version
+# tag is pushed.
+#
+# @spec: test-and-release#release-on-tag
+name: Release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+# Read-only by default; only publish and pin_marketplace write.
+# @spec: test-and-release#workflow-token-least-privilege
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      major: ${{ steps.v.outputs.major }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # A tag on any other commit would publish unreviewed code under an
+      # official version.
+      # @spec: test-and-release#release-from-main
+      - name: Tagged commit is on main
+        run: |
+          git fetch -q origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME points at $GITHUB_SHA, which is not on main"
+            exit 1
+          fi
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      # @spec: test-and-release#manifest-version-matches-tag
+      - run: go run ./cmd/release-check "$GITHUB_REF_NAME"
+      - run: go test ./...
+      - id: v
+        run: |
+          v=${GITHUB_REF_NAME#v}
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "major=${v%%.*}" >> "$GITHUB_OUTPUT"
+
+  # @spec: test-and-release#release-targets
+  build:
+    needs: check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [darwin/arm64, darwin/amd64, linux/amd64, linux/arm64, windows/amd64]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - name: Build agent and fake ingest
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          goos=${TARGET%/*}; goarch=${TARGET#*/}; ext=""
+          [ "$goos" = windows ] && ext=.exe
+          mkdir -p dist
+          for cmd in neo-tax-agent fake-ingest; do
+            GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build -trimpath \
+              -ldflags "-s -w -X main.Version=$VERSION" \
+              -o "dist/${cmd}_${goos}_${goarch}${ext}" "./cmd/$cmd"
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bin-${{ strategy.job-index }}
+          path: dist/*
+
+  # v0.x binaries ship unsigned. From v1.0 macOS binaries are signed and
+  # notarized and Windows binaries are signed before they are attached.
+  # @spec: test-and-release#unsigned-binaries-v0-1
+  # @spec: test-and-release#signing-v1-0
+  sign_macos:
+    needs: [check, build]
+    if: needs.check.outputs.major >= 1
+    runs-on: macos-latest
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Sign and notarize
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER }}
+        run: |
+          kc=build.keychain
+          security create-keychain -p ci "$kc"
+          security default-keychain -s "$kc"
+          security unlock-keychain -p ci "$kc"
+          echo "$CERT_P12" | base64 --decode > cert.p12
+          security import cert.p12 -k "$kc" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci "$kc"
+          echo "$NOTARY_KEY" > notary.p8
+          for f in dist/*_darwin_*; do
+            codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$f"
+            zip -j "$f.zip" "$f"
+            xcrun notarytool submit "$f.zip" --key notary.p8 --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" --wait
+            rm "$f.zip"
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: signed-darwin
+          path: dist/*_darwin_*
+
+  sign_windows:
+    needs: [check, build]
+    if: needs.check.outputs.major >= 1
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: azure/trusted-signing-action@1d365fec12862c4aa68fcac418143d73f0cea293 # v0.5.11
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE }}
+          files-folder: dist
+          files-folder-filter: exe
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: signed-windows
+          path: dist/*_windows_*
+
+  # @spec: test-and-release#release-attaches-binaries
+  # @spec: test-and-release#fake-ingest-is-released
+  publish:
+    needs: [check, build, sign_macos, sign_windows]
+    if: ${{ !failure() && !cancelled() }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: bin-*
+          path: dist
+          merge-multiple: true
+      - name: Use signed binaries (v1.0 and later)
+        if: needs.check.outputs.major >= 1
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: signed-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > checksums.txt
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A rerun after a successful publish keeps the binaries already
+          # attached rather than failing on the existing release.
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "$GITHUB_REF_NAME is already released"
+            exit 0
+          fi
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+
+  # Installs the release the way a fleet does before anyone is pointed at it:
+  # the marketplace's git-subdir source fetched from GitHub at the tag, and
+  # the launcher downloading and verifying the binary attached to the release.
+  # @spec: test-and-release#fleet-install-before-pin
+  fleet_install:
+    needs: publish
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - run: npm install -g @anthropic-ai/claude-code@2.1.325
+      - name: Install from the release and run one session
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SMOKE_RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          [ -n "$ANTHROPIC_API_KEY" ] || export SMOKE_SKIP_PROMPT=1
+          ./scripts/smoke-test.sh
+
+  # Only after the release and its binaries exist, and a fleet-style install
+  # of them works, does the stable marketplace on main point at the tag, so an
+  # install or auto-update never lands on a tag whose binaries are missing. main is protected (pull request with one
+  # approval, signed commits), so the pin reaches it as a pull request whose
+  # commit is created through the GitHub API, which GitHub signs.
+  # @spec: test-and-release#marketplace-source-is-this-repo
+  # @spec: test-and-release#pin-through-pull-request
+  pin_marketplace:
+    needs: [publish, fleet_install]
+    # publish runs after skipped v0 signing jobs; without an explicit
+    # condition this job would inherit their skip.
+    if: ${{ !cancelled() && needs.publish.result == 'success' && needs.fleet_install.result == 'success' }}
+    concurrency:
+      group: pin_marketplace
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - run: go run ./cmd/release-check -pin "$GITHUB_REF_NAME"
+      - name: Open a pull request that pins the marketplace on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet; then
+            echo "main already pins the marketplace to $GITHUB_REF_NAME"
+            exit 0
+          fi
+          branch="release/pin-$GITHUB_REF_NAME"
+          title="Pin the marketplace to $GITHUB_REF_NAME"
+
+          # A rerun after the pull request was opened has nothing to do.
+          open=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --base main --state open --json url --jq '.[0].url // empty')
+          if [ -n "$open" ]; then
+            echo "already open: $open"
+            exit 0
+          fi
+
+          # Start the branch at main's head, resetting it if an earlier run
+          # left it behind without a pull request.
+          base=$(git rev-parse HEAD)
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/heads/$branch" -f sha="$base" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch" -f sha="$base" -F force=true >/dev/null
+          fi
+
+          # createCommitOnBranch commits as the token's identity and GitHub
+          # signs the commit; a custom author or committer would drop that.
+          git diff --name-only | while read -r f; do
+            jq -n --arg path "$f" --arg contents "$(base64 -w0 "$f")" '{path: $path, contents: $contents}'
+          done | jq -s \
+            --arg repo "$GITHUB_REPOSITORY" --arg branch "$branch" \
+            --arg oid "$base" --arg headline "$title" \
+            '{query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }",
+              variables: {input: {
+                branch: {repositoryNameWithOwner: $repo, branchName: $branch},
+                expectedHeadOid: $oid,
+                message: {headline: $headline},
+                fileChanges: {additions: .}}}}' >"$RUNNER_TEMP/commit.json"
+          gh api graphql --input "$RUNNER_TEMP/commit.json" --jq '.data.createCommitOnBranch.commit.oid'
+
+          gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$branch" --title "$title" --body "Opened by the release workflow after $GITHUB_REF_NAME was published with its binaries attached. Merging it points the stable marketplace, and every engineer's install and auto-update, at $GITHUB_REF_NAME. main requires one approval, so approve and squash-merge it.
+
+          Pull requests opened with the workflow token do not trigger CI; the change is the marketplace's version and ref fields only."
