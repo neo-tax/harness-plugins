@@ -72,6 +72,19 @@ func (s *Store) Update(updates map[string]Cursor) error {
 	return s.write(m)
 }
 
+// Merge records cursors without moving any stored cursor backwards: a
+// cursor already further along in the same file is kept. Callers hold Lock.
+func (s *Store) Merge(updates map[string]Cursor) error {
+	m := s.load()
+	for path, c := range updates {
+		if old, ok := m[path]; ok && old.Head == c.Head && old.Offset > c.Offset {
+			continue
+		}
+		m[path] = c
+	}
+	return s.write(m)
+}
+
 // Reset forgets every cursor, so the next read starts each transcript from
 // the beginning.
 func (s *Store) Reset() error { return s.write(map[string]Cursor{}) }

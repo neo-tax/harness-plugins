@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/neo-tax/harness-plugins/internal/adapter/claudecode"
 )
 
 var agentBin, fakeBin string
@@ -43,6 +45,7 @@ type world struct {
 	data       string
 	repo       string
 	transcript string
+	config     string // CLAUDE_CONFIG_DIR, so backfill never reads this machine's sessions
 }
 
 func freePort(t *testing.T) string {
@@ -62,7 +65,7 @@ func newWorld(t *testing.T) *world {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
-	w := &world{t: t, url: "http://" + addr, data: t.TempDir(), repo: t.TempDir()}
+	w := &world{t: t, url: "http://" + addr, data: t.TempDir(), repo: t.TempDir(), config: t.TempDir()}
 	for i := 0; ; i++ {
 		if resp, err := http.Get(w.url + "/_fake/events"); err == nil {
 			resp.Body.Close()
@@ -92,7 +95,8 @@ func newWorld(t *testing.T) *world {
 }
 
 func (w *world) env() []string {
-	return append(os.Environ(), "NEO_TAX_AGENT_BIN="+agentBin, "NEO_TAX_DATA_DIR="+w.data, "CLAUDE_CODE_ENTRYPOINT=cli", "GIT_CONFIG_GLOBAL=/dev/null")
+	return append(os.Environ(), "NEO_TAX_AGENT_BIN="+agentBin, "NEO_TAX_DATA_DIR="+w.data, "CLAUDE_CODE_ENTRYPOINT=cli",
+		"GIT_CONFIG_GLOBAL=/dev/null", "CLAUDE_CONFIG_DIR="+w.config)
 }
 
 // shim runs the plugin's bin/neo-tax-agent, as hooks and skills do.
@@ -125,8 +129,28 @@ func (w *world) hook(name string, extra map[string]any) {
 
 func (w *world) login() {
 	w.t.Helper()
+	before, _ := claudecode.ReadBackfillStatus(w.data)
 	if out, code := w.shim("", "login", "--server", w.url, "--token", "et", "--email", "e@example.com"); code != 0 {
 		w.t.Fatalf("login exit %d: %s", code, out)
+	}
+	w.waitBackfill(before.StartedAt)
+}
+
+// waitBackfill waits for the detached backfill that login or --background
+// started after since to finish, so it never races the test's own hooks or
+// its temp-dir cleanup.
+func (w *world) waitBackfill(since time.Time) {
+	w.t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		st, err := claudecode.ReadBackfillStatus(w.data)
+		if err == nil && st.StartedAt.After(since) && !st.FinishedAt.IsZero() {
+			return
+		}
+		if time.Now().After(deadline) {
+			w.t.Fatal("background backfill did not finish")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -269,6 +293,74 @@ func TestLoginWithoutInputExplains(t *testing.T) {
 	w := newWorld(t)
 	out, code := w.shim("", "login", "--server", w.url)
 	if code != 3 || !strings.Contains(out, "--token") {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+}
+
+// pastSession puts a finished session under CLAUDE_CONFIG_DIR/projects.
+func (w *world) pastSession() {
+	w.t.Helper()
+	dir := filepath.Join(w.config, "projects", "-past")
+	os.MkdirAll(dir, 0o700)
+	os.WriteFile(filepath.Join(dir, "33333333-3333-4333-8333-333333333333.jsonl"), []byte(`{"type":"user","timestamp":"2026-10-20T09:00:00Z","cwd":"`+w.repo+`","gitBranch":"old","version":"2.1.310","message":{"content":"x"}}
+{"type":"assistant","timestamp":"2026-10-20T09:00:01Z","gitBranch":"old","version":"2.1.310","message":{"id":"msg_P","model":"m","usage":{"input_tokens":3,"output_tokens":4}}}
+`), 0o600)
+}
+
+// The backfill skill's --background form returns at once and the detached
+// backfill still runs.
+// @spec: event-queue-and-backfill#backfill-command
+func TestBackfillInBackground(t *testing.T) {
+	w := newWorld(t)
+	w.login()
+	w.pastSession()
+	before, _ := claudecode.ReadBackfillStatus(w.data)
+	out, code := w.shim("", "backfill", "--background")
+	if code != 0 || !strings.Contains(out, "background") {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	w.waitBackfill(before.StartedAt)
+	if k := kinds(w.recorded()); k != "opened,turn" {
+		t.Fatalf("recorded %s", k)
+	}
+}
+
+// @spec: event-queue-and-backfill#backfill-after-login
+// @spec: device-enrollment#backfill-after-interactive-login
+func TestLoginStartsBackfill(t *testing.T) {
+	w := newWorld(t)
+	w.pastSession()
+	out, code := w.shim("", "login", "--server", w.url, "--token", "et", "--email", "e@example.com")
+	if code != 0 || !strings.Contains(out, "background") {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	w.waitBackfill(time.Time{})
+	got := w.recorded()
+	if k := kinds(got); k != "opened,turn" || got[0]["session_id"] != "33333333-3333-4333-8333-333333333333" {
+		t.Fatalf("recorded %s", k)
+	}
+}
+
+// @spec: event-queue-and-backfill#backfill-command
+func TestBackfillCommand(t *testing.T) {
+	w := newWorld(t)
+	w.login()
+	w.pastSession()
+	out, code := w.shim("", "backfill")
+	if code != 0 || !strings.Contains(out, "Backfilled 1 sessions") {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	if k := kinds(w.recorded()); k != "opened,turn" {
+		t.Fatalf("recorded %s", k)
+	}
+}
+
+// --background refuses up front, with the reason, when the backfill could
+// not run.
+func TestBackgroundBackfillRefusesBeforeLogin(t *testing.T) {
+	w := newWorld(t)
+	out, code := w.shim("", "backfill", "--background")
+	if code == 0 || !strings.Contains(out, "neo-tax:login") {
 		t.Fatalf("exit %d: %s", code, out)
 	}
 }
