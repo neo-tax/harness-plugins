@@ -171,8 +171,8 @@ Neo.Tax keeps these metrics, each data point's value and its start and end times
 | `claude_code.commit.count` | Commits created. |
 | `claude_code.pull_request.count` | Pull requests created, without their numbers. |
 | `claude_code.active_time.total` | Time the engineer was active in the session, split into time at the keyboard and time waiting on tools and the model. |
-| `claude_code.token.usage` | Tokens used, kept only to check how much of a session's usage reached Neo.Tax as log records. |
-| `claude_code.cost.usage` | Claude Code's estimated cost, kept only for the same check. |
+| `claude_code.token.usage` | Tokens used, by kind of token. Kept to check how much of a session's usage reached Neo.Tax as log records, and used as the session's usage, with its cache writes not split by cache duration, when no turn of the session reached Neo.Tax. |
+| `claude_code.cost.usage` | Claude Code's estimated cost, kept for the same check and the same fallback. |
 
 Of each kept data point's attributes it keeps only these; agent, skill, plugin, and MCP server names, and exemplars, are dropped:
 

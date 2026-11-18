@@ -43,15 +43,15 @@ var TelemetryLogAttributes = []TelemetryAttribute{
 }
 
 // TelemetryMetrics are the Claude Code metrics the endpoint keeps
-// (otlp-ingest `claude-code-session-activity` and
-// `claude-code-usage-metrics-for-coverage`).
+// (otlp-ingest `claude-code-session-activity`,
+// `claude-code-usage-metrics-for-coverage`, and `metric-usage-fallback`).
 var TelemetryMetrics = []TelemetryAttribute{
 	{"claude_code.lines_of_code.count", "Lines of code added and removed."},
 	{"claude_code.commit.count", "Commits created."},
 	{"claude_code.pull_request.count", "Pull requests created, without their numbers."},
 	{"claude_code.active_time.total", "Time the engineer was active in the session, split into time at the keyboard and time waiting on tools and the model."},
-	{"claude_code.token.usage", "Tokens used, kept only to check how much of a session's usage reached Neo.Tax as log records."},
-	{"claude_code.cost.usage", "Claude Code's estimated cost, kept only for the same check."},
+	{"claude_code.token.usage", "Tokens used, by kind of token. Kept to check how much of a session's usage reached Neo.Tax as log records, and used as the session's usage, with its cache writes not split by cache duration, when no turn of the session reached Neo.Tax."},
+	{"claude_code.cost.usage", "Claude Code's estimated cost, kept for the same check and the same fallback."},
 }
 
 // TelemetryMetricAttributes are the attributes the endpoint keeps on a kept
