@@ -32,7 +32,7 @@ type Options struct {
 	// StallFor is how long the stall fault holds a request. Defaults to 30s.
 	StallFor time.Duration
 	// Record, when set, receives one JSON line per accepted event, as it
-	// was first accepted; a shared event later filed under another session
+	// was first accepted; a shared turn later filed under another session
 	// (see owners) is not rewritten there, but GET /_fake/events shows it.
 	Record io.Writer
 	// RecordDuplicates, when set, receives one JSON line per event dropped
@@ -298,8 +298,8 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 		}
 		k := idempotencyKey(ev)
 		if idx, ok := s.seen[k]; ok {
-			if s.owners.report(k, ev, raw) {
-				s.events[idx] = s.owners.best(k)
+			if s.owners.replaces(s.events[idx], ev) {
+				s.events[idx] = raw
 			}
 			resp.Duplicates++
 			if s.opts.RecordDuplicates != nil {
@@ -309,11 +309,8 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 		}
 		s.seen[k] = len(s.events)
 		s.events = append(s.events, raw)
-		s.owners.report(k, ev, raw)
 		if ev["event_kind"] == contract.KindOpened {
-			for _, moved := range s.owners.opened(ev) {
-				s.events[s.seen[moved]] = s.owners.best(moved)
-			}
+			s.owners.opened(ev)
 		}
 		resp.Accepted++
 		if s.opts.Record != nil {

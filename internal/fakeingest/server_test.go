@@ -409,21 +409,32 @@ func TestSharedTurnGoesToTheParentWhicheverArrivesFirst(t *testing.T) {
 	}
 }
 
+// A session that has sent its session.opened outranks one that has not.
+// @spec: session-event-wire-contract#shared-event-owner
+func TestSharedTurnStaysWithAnOpenedSession(t *testing.T) {
+	t0 := time.Date(2026, 10, 25, 9, 0, 0, 0, time.UTC)
+	h := start(t, fakeingest.Options{})
+	er := h.enroll()
+	h.ingest(er.DeviceKey, openedAs(er.DeviceID, "s-b", "resume", t0.Add(time.Hour)), turnIn(er.DeviceID, "s-b", "msg_1"))
+	h.ingest(er.DeviceKey, turnIn(er.DeviceID, "s-a", "msg_1"))
+	if got := ownerOf(h, "msg_1"); got != "s-b" {
+		t.Fatalf("msg_1 belongs to %v, want the opened s-b", got)
+	}
+}
+
 // Without a fork among them, the session that started first owns a shared
-// turn, and a session.opened arriving after the turn moves it.
+// turn. A session.opened that arrives after the session's copy was dropped,
+// as with a restarted backfill, takes effect when the session sends the turn
+// again.
 // @spec: session-event-wire-contract#shared-event-owner
 func TestSharedTurnGoesToTheEarliestSession(t *testing.T) {
 	t0 := time.Date(2026, 10, 25, 9, 0, 0, 0, time.UTC)
 	h := start(t, fakeingest.Options{})
 	er := h.enroll()
-	// "s-a" sorts first, so before any session.opened it owns the turn.
-	h.ingest(er.DeviceKey, turnIn(er.DeviceID, "s-b", "msg_1"), turnIn(er.DeviceID, "s-a", "msg_1"))
+	h.ingest(er.DeviceKey, openedAs(er.DeviceID, "s-b", "resume", t0.Add(time.Hour)), turnIn(er.DeviceID, "s-b", "msg_1"))
+	h.ingest(er.DeviceKey, turnIn(er.DeviceID, "s-a", "msg_1"))
+	h.ingest(er.DeviceKey, openedAs(er.DeviceID, "s-a", "startup", t0), turnIn(er.DeviceID, "s-a", "msg_1"))
 	if got := ownerOf(h, "msg_1"); got != "s-a" {
-		t.Fatalf("before any opened, msg_1 belongs to %v", got)
-	}
-	h.ingest(er.DeviceKey, openedAs(er.DeviceID, "s-a", "startup", t0.Add(time.Hour)))
-	h.ingest(er.DeviceKey, openedAs(er.DeviceID, "s-b", "resume", t0))
-	if got := ownerOf(h, "msg_1"); got != "s-b" {
-		t.Fatalf("msg_1 belongs to %v, want the earlier s-b", got)
+		t.Fatalf("msg_1 belongs to %v, want the earlier s-a", got)
 	}
 }
