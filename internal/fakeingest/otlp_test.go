@@ -56,7 +56,7 @@ func (h *harness) otlpRecords() []fakeingest.OTLPRecord {
 	return out
 }
 
-// @spec: otlp-ingest#fake-ingest-accepts-otlp
+// @spec: claude-code-telemetry-export#fake-ingest-accepts-otlp
 func TestOTLPLogsAndMetricsRecorded(t *testing.T) {
 	h := start(t, fakeingest.Options{IngestKeys: []string{"ik"}})
 	if c := h.postRaw("/otlp/v1/logs", "ik", "application/json", "", []byte(logsExport)); c != 200 {
@@ -80,7 +80,7 @@ func TestOTLPLogsAndMetricsRecorded(t *testing.T) {
 	}
 }
 
-// @spec: otlp-ingest#fake-ingest-accepts-otlp
+// @spec: claude-code-telemetry-export#fake-ingest-accepts-otlp
 func TestOTLPAuthenticatesFirst(t *testing.T) {
 	h := start(t, fakeingest.Options{IngestKeys: []string{"ik"}})
 	for _, key := range []string{"", "wrong"} {
@@ -90,7 +90,7 @@ func TestOTLPAuthenticatesFirst(t *testing.T) {
 	}
 }
 
-// @spec: otlp-ingest#fake-ingest-accepts-otlp
+// @spec: claude-code-telemetry-export#fake-ingest-accepts-otlp
 func TestOTLPRefusesDeviceKey(t *testing.T) {
 	h := start(t, fakeingest.Options{})
 	er := h.enroll()
@@ -102,7 +102,7 @@ func TestOTLPRefusesDeviceKey(t *testing.T) {
 	}
 }
 
-// @spec: otlp-ingest#fake-ingest-accepts-otlp
+// @spec: claude-code-telemetry-export#fake-ingest-accepts-otlp
 func TestOTLPContentTypeAndShape(t *testing.T) {
 	h := start(t, fakeingest.Options{})
 	if c := h.postRaw("/otlp/v1/logs", "ik", "application/x-protobuf", "", []byte{1, 2}); c != 415 {
@@ -119,7 +119,7 @@ func TestOTLPContentTypeAndShape(t *testing.T) {
 	}
 }
 
-// @spec: otlp-ingest#fake-ingest-accepts-otlp
+// @spec: claude-code-telemetry-export#fake-ingest-accepts-otlp
 func TestOTLPGzip(t *testing.T) {
 	h := start(t, fakeingest.Options{})
 	var buf bytes.Buffer

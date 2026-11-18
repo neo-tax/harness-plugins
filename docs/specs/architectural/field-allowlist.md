@@ -4,7 +4,7 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-10-24
-updated: 2026-11-15
+updated: 2026-11-18
 version: 8
 affects:
   - internal/allowlist/*.go
@@ -54,7 +54,7 @@ Customers' security teams ask exactly what leaves an engineer's machine, and the
 
 The allowlist lives in the shared agent rather than in the schema validator because the schema says what is valid, not what is permitted: a schema with `additionalProperties` false would reject an over-full event at the server, after it had already left the laptop. Enforcement has to happen before the queue. The allowlist checks names, not values, so an adapter bug could still put a path or prompt text into a permitted string field; validating each allowlisted event against the schema before queuing closes that for every field the schema constrains by type, enum, format, or pattern. Free-text fields the schema leaves unconstrained (branch, model, and the like) are covered only by the allowlist and adapter tests. The exclusion requirements (`cwd-excluded`, `title-excluded`, `content-excluded`) are held by reviewing each allowlist entry; their test is a tripwire that flags an allowlisted name that looks content-bearing, not proof that no permitted field carries content.
 
-This allowlist governs only what leaves the agent. A harness's own telemetry reaches Neo.Tax without passing through the agent, so the OTLP endpoint holds a separate allowlist on the server (`otlp-ingest`).
+This allowlist governs only what leaves the agent. A harness's own telemetry reaches Neo.Tax without passing through the agent, so the OTLP endpoint holds a separate allowlist on the server (platform-new's `otlp-ingest`).
 
 Generating the statement from code is what lets the answer to a security questionnaire be "this table, and the test that proves it" rather than a document someone remembers to update.
 

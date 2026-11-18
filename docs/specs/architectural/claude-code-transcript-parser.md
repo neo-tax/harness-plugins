@@ -4,7 +4,7 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-10-24
-updated: 2026-11-15
+updated: 2026-11-18
 version: 11
 affects:
   - internal/adapter/claudecode/*.go
@@ -70,6 +70,6 @@ Claude Code makes API calls that never become an assistant message in the transc
 - **The harness changes its transcript format.** Turns stop being parsed and sessions report `usage.source` unknown. Mitigated by fixtures per harness version and by the usage-unknown rate being a v0.1 exit criterion; the agent logs a parse failure with the harness version and never crashes the hook.
 - **A harness release starts canceling async `SessionEnd` hooks.** A hook canceled before its events are queued loses `session.closed` and the session's final tail. Detected by the server's rate of sessions without `session.closed` per harness version; the install smoke test can assert `session.closed` arrives after the harness exits.
 - **A session with no `SessionEnd`.** The harness was killed and no `session.closed` arrives. Accepted; the server treats a session as closed after inactivity. Its side usage is lost as well, since Claude Code writes `cost-state` only on a clean exit.
-- **Transcript saving is off.** Claude Code then writes no transcript, so the adapter emits the session's opens and closes but no turns; a session launched from inside another Claude Code session inherits a marker that turns saving off. Detectable as sessions with no turns; the OTLP path (`otlp-ingest`) still reports their calls.
+- **Transcript saving is off.** Claude Code then writes no transcript, so the adapter emits the session's opens and closes but no turns; a session launched from inside another Claude Code session inherits a marker that turns saving off. Detectable as sessions with no turns; the OTLP path (platform-new's `otlp-ingest`) still reports their calls.
 - **Side usage has no speed.** `cost-state` totals are per model, not per speed, so side calls made in fast mode (compaction in a fast session) are reported without it and priced at standard speed. Claude Code's telemetry splits its token and cost metrics by `speed`, which bounds the error where it is exported.
 - **`cost-state` changes or disappears.** `side_usage` turns null and side calls go uncounted again. Detectable: the server can watch the null rate per harness version, and `scripts/dev.sh audit` re-measures against the API.

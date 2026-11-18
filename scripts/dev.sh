@@ -31,7 +31,7 @@ set -eu
 # Everything written under .dev is private: recorded telemetry carries the
 # engineer's email and account ids. Claude Code itself runs with the
 # engineer's own umask, so files it writes in their work tree are unaffected.
-# @spec: otlp-ingest#dev-stack-private
+# @spec: claude-code-telemetry-export#dev-stack-private
 user_umask=$(umask)
 umask 077
 
@@ -195,8 +195,8 @@ run_claude() {
   # per-signal endpoint would send this session's telemetry to a real
   # collector, and a content switch such as OTEL_LOG_USER_PROMPTS would have
   # the fake write prompts to .dev/otlp.jsonl.
-  # @spec: otlp-ingest#dev-stack-exports-telemetry
-  # @spec: otlp-ingest#dev-stack-clears-inherited-telemetry
+  # @spec: claude-code-telemetry-export#dev-stack-exports-telemetry
+  # @spec: claude-code-telemetry-export#dev-stack-clears-inherited-telemetry
   for v in $(env | sed -n 's/^\(OTEL_[A-Za-z0-9_]*\)=.*/\1/p; s/^\(CLAUDE_CODE_OTEL_[A-Za-z0-9_]*\)=.*/\1/p'); do
     unset "$v"
   done
@@ -243,7 +243,7 @@ events() {
 
 # capture runs Claude Code through the dev stack in the ways that change a
 # session's id, then checks both paths against what it saw.
-# @spec: otlp-ingest#dev-stack-capture
+# @spec: claude-code-telemetry-export#dev-stack-capture
 capture() {
   need expect
   running fake-ingest || die "the fake ingest server is not running; run scripts/dev.sh up"
