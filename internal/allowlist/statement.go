@@ -25,11 +25,11 @@ The neo-tax plugin reports metadata about AI coding sessions so Neo.Tax can attr
 
 ## Identity
 
-Neo.Tax receives one value meant to identify the engineer: the email the engineer confirms at enrollment, which is stored with the device's key rather than sent with each event. Events carry the device id, and Neo.Tax knows which engineer enrolled the device.
+From the plugin, Neo.Tax receives one value meant to identify the engineer: the email the engineer confirms at enrollment, which is stored with the device's key rather than sent with each event. Events carry the device id, and Neo.Tax knows which engineer enrolled the device.
 
 Three other values are not meant to identify anyone but can. ` + "`branch`" + ` is free text the engineer or their tools choose, so it can contain a name, a username, or anything else typed into it. ` + "`repo.owner`" + ` is the account that owns the repository, which is a personal username when the repository lives under a personal account rather than an organization. The device hostname, sent once at enrollment as a readable name for the device, often contains the engineer's name.
 
-Claude Code's own telemetry, when an organization turns it on, also carries the email of the engineer's Claude account; see the last section.
+Claude Code's own telemetry, when an organization turns it on, also carries the email of the engineer's Claude account, which is meant to identify the engineer, and ` + "`vcs.owner.name`" + `, which is a personal username in the same case as ` + "`repo.owner`" + `; see the last section.
 
 ## Never sent
 
