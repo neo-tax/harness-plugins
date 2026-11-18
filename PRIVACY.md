@@ -2,13 +2,15 @@
 
 # What the neo-tax plugin sends
 
-The neo-tax plugin reports metadata about AI coding sessions so Neo.Tax can attribute AI token spend to the pull requests and tickets it already tracks. This page lists every field it can send. The list is generated from the allowlist inside the agent; any field not listed here is removed on the engineer's machine before it is written to disk or sent.
+The neo-tax plugin reports metadata about AI coding sessions so Neo.Tax can attribute AI token spend to the pull requests and tickets it already tracks. This page lists every field it can send. The list is generated from the allowlist inside the agent; any field not listed here is removed on the engineer's machine before it is written to disk or sent. When an organization also turns on Claude Code's own telemetry, Claude Code sends it to Neo.Tax separately; the last section lists what Neo.Tax keeps of it.
 
 ## Identity
 
 Neo.Tax receives one value meant to identify the engineer: the email the engineer confirms at enrollment, which is stored with the device's key rather than sent with each event. Events carry the device id, and Neo.Tax knows which engineer enrolled the device.
 
 Three other values are not meant to identify anyone but can. `branch` is free text the engineer or their tools choose, so it can contain a name, a username, or anything else typed into it. `repo.owner` is the account that owns the repository, which is a personal username when the repository lives under a personal account rather than an organization. The device hostname, sent once at enrollment as a readable name for the device, often contains the engineer's name.
+
+Claude Code's own telemetry, when an organization turns it on, also carries the email of the engineer's Claude account; see the last section.
 
 ## Never sent
 
@@ -127,3 +129,61 @@ Enrollment sends one request, when the engineer runs `neo-tax:login`. That happe
 | `device.harness` | Which coding harness the device is enrolled for, for example claude-code. |
 | `device.harness_version` | Version of the harness; null when unknown. |
 | `device.agent_version` | Version of the neo-tax-agent binary. |
+
+## Claude Code's own telemetry
+
+This section applies only when an organization turns on Claude Code's telemetry export with the managed settings Neo.Tax provides. Claude Code then sends its own usage telemetry, as OpenTelemetry logs and metrics, to Neo.Tax directly. It does not pass through the neo-tax plugin, so the plugin's allowlist above does not apply to it, and this section is maintained by hand from the rules Neo.Tax's server applies rather than generated.
+
+Those managed settings leave Claude Code's content logging off, so Claude Code redacts prompts, responses, and tool details before they leave the machine. Claude Code sends more attributes than Neo.Tax keeps, such as account and organization ids and the terminal type. Neo.Tax drops every attribute, resource attribute, and record body not listed below before anything is stored or logged. Prompt text, response text, tool inputs and outputs, commands, file paths, the names of tools, skills, and MCP servers, and API request and response bodies are dropped even when an administrator configures Claude Code to send them.
+
+Unlike session events, telemetry identifies the engineer directly: it carries `user.email`, the email of the Claude account the engineer signs in to Claude Code with.
+
+### Log records
+
+Neo.Tax keeps only `claude_code.api_request` records, one per model API call, and drops every other Claude Code event, including prompts, tool results and decisions, and API errors. Of each record it keeps:
+
+| Attribute | Contents |
+| --- | --- |
+| `session.id` | Claude Code's id for the session, the same id the plugin sends as `session_id`. |
+| `user.email` | Email of the Claude account the engineer is signed in to Claude Code with. |
+| `model` | Model name the call ran on. |
+| `input_tokens` | Uncached input tokens. |
+| `output_tokens` | Output tokens. |
+| `cache_read_tokens` | Input tokens read from the prompt cache. |
+| `cache_creation_5m_tokens` | Input tokens written to the five-minute prompt cache. |
+| `cache_creation_1h_tokens` | Input tokens written to the one-hour prompt cache. |
+| `cache_creation_tokens` | Input tokens written to the prompt cache, used only when Claude Code does not split them by cache duration. |
+| `speed` | Speed the call ran at, standard or fast, which sets its price per token. |
+| `cost_usd` | Claude Code's own estimate of the call's cost in US dollars. |
+| `request_id` | The model vendor's API request id for the call. |
+| `event.timestamp` | When Claude Code recorded the call; the record's own timestamps are used when it is missing. |
+| `vcs.repository.url.full` | URL of the repository's git remote; only its host is kept. |
+| `vcs.owner.name` | Organization or user that owns the repository. |
+| `vcs.repository.name` | Repository name. |
+
+### Metrics
+
+Neo.Tax keeps these metrics, each data point's value and its start and end times, and drops every other Claude Code metric:
+
+| Metric | Contents |
+| --- | --- |
+| `claude_code.lines_of_code.count` | Lines of code added and removed. |
+| `claude_code.commit.count` | Commits created. |
+| `claude_code.pull_request.count` | Pull requests created, without their numbers. |
+| `claude_code.active_time.total` | Time the engineer was active in the session, split into time at the keyboard and time waiting on tools and the model. |
+| `claude_code.token.usage` | Tokens used, kept only to check how much of a session's usage reached Neo.Tax as log records. |
+| `claude_code.cost.usage` | Claude Code's estimated cost, kept only for the same check. |
+
+Of each kept data point's attributes it keeps only these; agent, skill, plugin, and MCP server names, and exemplars, are dropped:
+
+| Attribute | Contents |
+| --- | --- |
+| `session.id` | Claude Code's id for the session. |
+| `user.email` | Email of the Claude account the engineer is signed in to Claude Code with. |
+| `model` | Model name, on token and cost metrics. |
+| `type` | Which kind of count: added or removed lines, keyboard or waiting time, or the kind of token. |
+| `query_source` | Which part of Claude Code made the calls, such as the main conversation or a subagent. |
+| `speed` | Speed the calls ran at. |
+| `vcs.repository.url.full` | URL of the repository's git remote; only its host is kept. |
+| `vcs.owner.name` | Organization or user that owns the repository. |
+| `vcs.repository.name` | Repository name. |
