@@ -4,7 +4,7 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-10-24
-updated: 2026-11-17
+updated: 2026-11-18
 version: 14
 affects:
   - contract/*.schema.json
@@ -44,7 +44,8 @@ The plugin's ingest endpoint is one of Neo.Tax's two entry points into the sessi
 - `closed-fields`(built): A `session.closed` event carries `ended_at`, `reason`, `dropped_events`, and `side_usage`.
   - status-reason: the schema's closed definition has these properties; TestTypedFieldsMatchSchemaProperties proves only that the Go type and the schema agree, and TestEventRejections that `side_usage` is required; no test compares the schema to this list
 - `side-usage-shape`(tested): `side_usage` is null when the harness recorded no session totals, or when they cannot be matched to the session's turns, else an array with at most one entry per model, each carrying `model` and the non-negative integer counts `input`, `output`, `cache_write_5m`, `cache_write_1h`, and `cache_read`.
-- `side-usage-cumulative`(approved): `side_usage` covers the whole session up to that close, so the server takes it from the session's `session.closed` with the latest `ended_at` whose `side_usage` is not null, and never adds two closes' `side_usage` together.
+- `side-usage-cumulative`(built): `side_usage` covers the whole session up to that close, so the server takes it from the session's `session.closed` with the latest `ended_at` whose `side_usage` is not null, and never adds two closes' `side_usage` together.
+  - status-reason: unmerged: built in platform-new #5742, which is still open, in projects/server/src/harness-ingest/otlp/harness-session-record.service.ts (`sideUsageOf`, which keeps each device's latest close with `side_usage`), and tested there in projects/server/test/test-new/harness-ingest/otlp/harness-session-record.service.spec.ts
 - `repo-shape`(tested): `repo` is either null or an object of `host`, `owner`, and `name`, each lowercase.
 - `subagent-turns-belong-to-parent`(tested): A turn produced by a subagent carries the parent session's `session_id` and a non-null `subagent_id`; a main-thread turn carries a null `subagent_id`.
 - `idempotency-key`(built): The server treats two `session.turn` events with the same `device_id` and `message_id` as the same event whatever their `session_id`, so a forked session that re-sends its parent's turns under its own id adds nothing, and which session keeps them is `shared-event-owner`; a `session.closed` is the same event as another with the same `device_id`, `session_id`, and `ended_at`, so a resumed session's later close is kept; a `session.opened` is the same as another with the same `device_id` and `session_id`.
@@ -64,6 +65,7 @@ The plugin's ingest endpoint is one of Neo.Tax's two entry points into the sessi
 - `auth-errors-are-distinct`(built): The server distinguishes an invalid or revoked device key (401), a device key that is valid but not permitted to ingest (403), and a schema failure (422) by status code, because the agent reacts to each differently.
   - status-reason: unmerged: built in platform-new #5601, which is still open, in projects/server/src/harness-ingest/harness-ingest.controller.ts; 401 and 422 are tested, 403 is reserved because a device has no state between live and revoked
 - `platform-vendors-pinned-copy`(approved): Neo.Tax's server validates incoming requests against a vendored copy of these schemas, and a CI check in that repository fails when the copy differs from the tagged release it pins.
+  - status-reason: platform-new #5601, which is still open, vendors the schemas in projects/server/src/harness-ingest/contract/v1/ and validates every request against them in harness-contract.ts, recording the pinned commit in contract/README.md; no CI check there compares the copy with the pin yet, and no release of this repository has been tagged to pin
 - `fake-ingest-validates-same-schemas`(tested): The fake ingest server validates requests against the schema documents in this repository, not against a separate copy.
 
 ## Design Notes
