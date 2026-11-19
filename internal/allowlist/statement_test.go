@@ -140,7 +140,8 @@ func TestStatementCoversTelemetry(t *testing.T) {
 	for _, want := range []string{
 		"does not pass through the neo-tax plugin",
 		"Prompt text, response text, tool inputs and outputs, commands, file paths",
-		"are dropped even when an administrator configures Claude Code to send them",
+		"before anything is stored. Prompt text",
+		"are dropped before anything is stored or logged, even when an administrator configures Claude Code to send them",
 		"telemetry identifies the engineer directly",
 	} {
 		if !strings.Contains(section, want) {
