@@ -5,12 +5,15 @@ owner:
   - Firas Abuzaid
 created: 2026-11-02
 updated: 2026-11-18
-version: 15
+version: 16
 affects:
   - deploy/claude-code/*
   - internal/fakeingest/otlp*.go
   - cmd/fake-ingest/*.go
   - scripts/dev.sh
+  - internal/allowlist/telemetry_statement.go
+  - internal/allowlist/statement.go
+  - PRIVACY.md
 ---
 
 # Claude Code telemetry export
@@ -24,12 +27,14 @@ v0.1 sends Claude Code's own export directly, through managed settings, under th
 ### Exporter configuration
 
 - `managed-settings-exporter`(tested): The managed settings Neo.Tax ships to turn on Claude Code's export, kept in this repository as `deploy/claude-code/managed-settings.json`, set `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_LOGS_EXPORTER=otlp`, `OTEL_METRICS_EXPORTER=otlp`, `OTEL_EXPORTER_OTLP_ENDPOINT` to the base endpoint `https://api.neo.tax/otlp`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/json`, `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta`, `OTEL_METRICS_INCLUDE_REPOSITORY=true`, and `OTEL_EXPORTER_OTLP_HEADERS` carrying the ingest key as a bearer token, and set no per-signal exporter variable that would override them.
-- `exporter-minimum-version`(approved): The telemetry path supports Claude Code 2.1.269 and later, the first version that sends repository attributes; an older Claude Code's telemetry-only turns have a null repo.
+- `exporter-minimum-version`(built): The telemetry path supports Claude Code 2.1.269 and later, the first version that sends repository attributes; an older Claude Code's telemetry-only turns have a null repo.
+  - status-reason: the managed settings use nothing a 2.1.269 exporter lacks, and the endpoint stores a null repo when the repository attributes are absent (platform-new's `otlp-ingest#claude-code-repo-mapping`, tested there); the managed settings deliberately set no minimum version, as the design notes explain
 - `managed-settings-no-content`(tested): The managed settings Neo.Tax ships to turn on Claude Code's export never enable `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_ASSISTANT_RESPONSES`, `OTEL_LOG_TOOL_DETAILS`, `OTEL_LOG_TOOL_CONTENT`, or `OTEL_LOG_RAW_API_BODIES`, so Claude Code redacts content before it leaves the machine.
 
 ### Privacy statement
 
-- `privacy-statement-covers-telemetry`(approved): The published privacy statement covers this path as well as the agent's: it lists, per source, the log and metric attributes the endpoint keeps, and says that content is dropped as `otlp-ingest#content-never-stored` describes.
+- `privacy-statement-covers-telemetry`(built): The published privacy statement covers this path as well as the agent's: it lists, per source, the log and metric attributes the endpoint keeps, and says that content is dropped as `otlp-ingest#content-never-stored` describes.
+  - status-reason: `PRIVACY.md`'s "Claude Code's own telemetry" section, rendered from the lists in internal/allowlist/telemetry_statement.go; TestStatementCoversTelemetry checks every listed attribute and the content statement appear, but the lists are copied by hand from platform-new's `otlp-ingest#server-allowlist`, `#metric-allowlist`, and the Claude Code mapping requirements, and nothing checks them against the server
 
 ### Local testing
 
@@ -54,6 +59,10 @@ From v1.0 Claude Code's export authenticates as the device that sent it, through
 
 The exporter settings are explicit because Claude Code's defaults do not match the endpoint. From 2.1.323 the default protocol is `http/protobuf`, which v0.1 answers with 415, a status the exporter does not retry, so every record would be lost without notice. Repository attributes are off unless `OTEL_METRICS_INCLUDE_REPOSITORY` is set, which would leave every telemetry-only turn with no repo. Delta temporality is already the default, and is set anyway so a later default change cannot break it.
 
+The managed settings set no minimum Claude Code version. Claude Code's managed `requiredMinimumVersion` makes an older Claude Code refuse to start, which would stop an engineer's work over a telemetry gap, and `minimumVersion` only stops auto-updates from going lower, so it would not move an older install forward. An older exporter costs only the repo on its telemetry-only turns; a turn the plugin also reported takes its repo from the plugin.
+
+The privacy statement's telemetry section is written by hand, unlike the rest of the statement, because what the endpoint keeps is decided by mappings in platform-new. It lists the attributes Claude Code's mapping keeps and is changed in the same release as the mapping.
+
 The managed settings leave Claude Code's content switches off, so on that configuration content does not leave the machine at all. The server's own allowlist (`otlp-ingest#server-allowlist`) covers an admin who turns them on, so this repository's guarantee is about what Neo.Tax ships, not about what arrives.
 
 Claude Code also supports `otelHeadersHelper`: a command, run at startup and every 29 minutes, whose printed JSON becomes the export's HTTP headers. It works only over HTTP, which v0.1 already requires. v1.0 points it at the agent, which trades the device key for a short-lived telemetry credential, so Claude Code's export is attributed to an enrolled device the way the agent's session events are, and the static key is left to sources with no agent. A device that is not enrolled then sends no telemetry until it is, since Claude Code exports nothing while the helper fails.
@@ -70,4 +79,4 @@ The fake ingest server's OTLP endpoints mirror the real endpoint's transport rul
 
 ## Open Questions
 
-- Whether the privacy statement's telemetry section is generated from the endpoint's mappings, as the agent's section is generated from the field allowlist, given that the mappings live in Neo.Tax's server rather than in this repo.
+- Whether the privacy statement's telemetry section should be generated from the endpoint's mappings, as the agent's section is generated from the field allowlist, once a second source makes copying them by hand error-prone. The mappings live in platform-new, so this needs them published somewhere this repo can read, such as a file vendored back here the way the contract is vendored there.
