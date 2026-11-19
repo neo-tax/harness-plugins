@@ -558,6 +558,9 @@ func backfillOne(a *agent.Agent, path, deviceID string, copied map[string]bool, 
 		// successfully.
 		agent.Logf(o.DataDir, "backfill transcript read failed: %s", errClass(err))
 	}
+	// The session.opened goes ahead of the session's turns, so the server
+	// knows the session's rank before it sees any turn it shares.
+	// @spec: session-event-wire-contract#opened-before-turns
 	opened := contract.NewOpened(ctx.envelope(start.Version), contract.OpenedFields{
 		StartedAt:  start.Timestamp.UTC(),
 		Entrypoint: nonEmpty(start.Entrypoint),

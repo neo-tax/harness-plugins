@@ -179,6 +179,7 @@ func emit(a *agent.Agent, name string, p payload, o HookOptions) error {
 	switch name {
 	case "SessionStart":
 		// @spec: claude-code-transcript-parser#opened-on-session-start
+		// @spec: session-event-wire-contract#opened-before-turns
 		events = append(events, contract.NewOpened(ctx.envelope(lastVersion(p.TranscriptPath, store)), contract.OpenedFields{
 			StartedAt:     ctx.Now.UTC(),
 			Entrypoint:    nonEmpty(o.Entrypoint),

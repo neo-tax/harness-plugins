@@ -4,14 +4,15 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-10-24
-updated: 2026-11-18
-version: 13
+updated: 2026-11-19
+version: 14
 affects:
   - contract/*.schema.json
   - contract/*.go
   - internal/fakeingest/*.go
   - cmd/fake-ingest/*.go
   - internal/adapter/claudecode/transcript.go
+  - internal/adapter/claudecode/backfill.go
   - internal/adapter/claudecode/sideusage.go
 ---
 
@@ -43,13 +44,16 @@ The plugin's ingest endpoint is one of Neo.Tax's two entry points into the sessi
 - `closed-fields`(built): A `session.closed` event carries `ended_at`, `reason`, `dropped_events`, and `side_usage`.
   - status-reason: the schema's closed definition has these properties; TestTypedFieldsMatchSchemaProperties proves only that the Go type and the schema agree, and TestEventRejections that `side_usage` is required; no test compares the schema to this list
 - `side-usage-shape`(tested): `side_usage` is null when the harness recorded no session totals, or when they cannot be matched to the session's turns, else an array with at most one entry per model, each carrying `model` and the non-negative integer counts `input`, `output`, `cache_write_5m`, `cache_write_1h`, and `cache_read`.
-- `side-usage-cumulative`(approved): `side_usage` covers the whole session up to that close, so the server takes it from the session's `session.closed` with the latest `ended_at` whose `side_usage` is not null, and never adds two closes' `side_usage` together.
+- `side-usage-cumulative`(built): `side_usage` covers the whole session up to that close, so the server takes it from the session's `session.closed` with the latest `ended_at` whose `side_usage` is not null, and never adds two closes' `side_usage` together.
+  - status-reason: unmerged: built in platform-new #5742, which is still open, in libs/ai-tokens/src/domain/src/session-record/session-record.ts (`sideUsageOf`, which keeps each device's latest close with `side_usage`), and tested there in projects/server/test/test-new/harness-ingest/otlp/read-harness-session-record.spec.ts
 - `repo-shape`(tested): `repo` is either null or an object of `host`, `owner`, and `name`, each lowercase.
 - `subagent-turns-belong-to-parent`(tested): A turn produced by a subagent carries the parent session's `session_id` and a non-null `subagent_id`; a main-thread turn carries a null `subagent_id`.
 - `idempotency-key`(built): The server treats two `session.turn` events with the same `device_id` and `message_id` as the same event whatever their `session_id`, so a forked session that re-sends its parent's turns under its own id adds nothing, and which session keeps them is `shared-event-owner`; a `session.closed` is the same event as another with the same `device_id`, `session_id`, and `ended_at`, so a resumed session's later close is kept; a `session.opened` is the same as another with the same `device_id` and `session_id`.
-  - status-reason: unmerged: built in platform-new #5601, which is still open, in projects/server/src/harness-ingest/harness-idempotency.ts, and tested there in projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts (a fork's copies of its parent's turns count as duplicates); the first one stored keeps its session, not the owner shared-event-owner names
-- `shared-event-owner`(approved): When more than one session reports the same `session.turn`, the server files it under one session chosen from the sessions that reported it, whatever order they arrived in: a session whose `session.opened` has a `source` other than fork, then the earliest `started_at`, then the lowest `session_id`. A session whose `session.opened` has not arrived ranks after every session whose has, and the server moves the event when a better-ranked session reports it or its `session.opened` arrives.
-  - status-reason: Neo.Tax's server does not do this yet (platform-new #5601 keeps the first session stored); the fake ingest server does, in internal/fakeingest/owners.go, tested in internal/fakeingest/server_test.go
+  - status-reason: unmerged: built in platform-new #5601, which is still open, in libs/ai-tokens/src/domain/src/harness-session-event/session-event-idempotency.ts, and tested there in projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts (a fork's copies of its parent's turns count as duplicates)
+- `opened-before-turns`(built): An agent sends a session's `session.opened` before any of that session's other events, or not at all.
+  - status-reason: a backfill emits each session's `session.opened` ahead of its turns, tested by TestBackfillEmitsEveryTranscriptNewestFirst; on the hook path it holds because `SessionStart` queues the `session.opened` before the first `Stop` queues a turn and the queue is flushed oldest first by one flusher, both hooks are async and no test pins their order, but each queues under the cursor lock, and the first `Stop` comes a prompt and a model reply after `SessionStart`, so a turn is queued first only if `SessionStart` stalls for longer than that reply; even then the owner is wrong only if a fork's copy of that turn arrives between the turn and its `session.opened`
+- `shared-event-owner`(built): When a `session.turn` arrives that another session already reported, the server keeps whichever of the stored copy and the new one belongs to the better-ranked session and drops the other: a session whose `session.opened` has a `source` other than fork, then the earliest `started_at`, then the lowest `session_id`. A session whose `session.opened` has not arrived ranks after every session whose has. Because of `opened-before-turns`, the owner does not depend on the order the copies arrive in.
+  - status-reason: unmerged: built in platform-new #5601, which is still open, in libs/ai-tokens/src/domain/src/harness-session-event/session-event-owner.ts (`fileSharedTurns`), and tested there in libs/ai-tokens/src/domain/test/harness-session-event/file-shared-turns.spec.ts and projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts; the fake ingest server does the same in internal/fakeingest/owners.go, tested in internal/fakeingest/server_test.go
 - `batched-ingest`(tested): An ingest request carries an ordered array of between 1 and 500 session events.
 - `ingest-response-per-event`(tested): An ingest response reports, for the batch as a whole, how many events were accepted, how many were duplicates, and the index and reason of each event rejected for schema reasons.
 - `schema-rejection-is-partial`(built): A schema-invalid event in a batch does not cause the server to reject the valid events in the same batch.
@@ -61,6 +65,7 @@ The plugin's ingest endpoint is one of Neo.Tax's two entry points into the sessi
 - `auth-errors-are-distinct`(built): The server distinguishes an invalid or revoked device key (401), a device key that is valid but not permitted to ingest (403), and a schema failure (422) by status code, because the agent reacts to each differently.
   - status-reason: unmerged: built in platform-new #5601, which is still open, in projects/server/src/harness-ingest/harness-ingest.controller.ts; 401 and 422 are tested, 403 is reserved because a device has no state between live and revoked
 - `platform-vendors-pinned-copy`(approved): Neo.Tax's server validates incoming requests against a vendored copy of these schemas, and a CI check in that repository fails when the copy differs from the tagged release it pins.
+  - status-reason: platform-new #5601, which is still open, vendors the schemas in projects/server/src/harness-ingest/contract/v1/ and validates every request against them in harness-contract.ts, recording the pinned commit in contract/README.md; no CI check there compares the copy with the pin yet, and no release of this repository has been tagged to pin
 - `fake-ingest-validates-same-schemas`(tested): The fake ingest server validates requests against the schema documents in this repository, not against a separate copy.
 
 ## Design Notes
@@ -82,6 +87,8 @@ Harness-specific identifiers (`session_id`, `message_id`, `request_id`, `subagen
 Turns are keyed without the session because Claude Code copies a parent session's transcript into a fork: a capture on 2026-11-11, before the adapter skipped the copies, saw a fork re-send its parent's two turns with the same message and request ids under the fork's session id. Keyed by session, every copy the adapter misses would count its parent's usage again. A message id is the model provider's id for one response, so it names one turn on a device whichever session reports it. Pull request links keep the session, because a link is a fact about one session: a fork that links a pull request its parent also linked is linked to it too, and nothing is counted twice, since a link carries no usage.
 
 The first session to report a shared turn used to keep it, which made ownership depend on arrival order. A backfill sends the newest transcript first, so a fork, being newer, usually reached the server before its parent and took the parent's turns. A test on Claude Code 2.1.325 found no field marking a fork's copied lines: they keep the parent's message id, request id, uuid, and timestamp, and only `sessionId` is rewritten. Converting a session to a background session copies the transcript the same way. The adapter now skips the copies: on the hook path by the fork's start time (`claude-code-transcript-parser#fork-skips-copied-lines`), and in a backfill by the line uuids a fork shares with its parent's transcript (`event-queue-and-backfill#backfill-skips-fork-copies`). Either can miss a fork: a fork's `SessionStart` that cannot take the cursor lock records no start, and a backfill cannot find the parent of a fork whose parent's transcript is gone. So the server still picks the owner by a rule that does not depend on order.
+
+The server compares only the stored copy with the arriving one, and keeps no other copy. Choosing among every copy ever reported would need each one stored, and the owner could then move whenever a late `session.opened` arrived, rewriting a turn long after it was filed. Comparing two copies loses nothing that keeping them all would gain, given `opened-before-turns`: a copy the server dropped lost to a session whose rank it already knew, and a session that never sends its `session.opened` (the plugin was enabled mid-session, its `SessionStart` failed, or the queue cap deleted the event) ranks last either way. A `session.opened` that does arrive late, from a backfill with `--restart`, is followed by that session's turns again, and each is compared afresh. A stored turn can still move, so anything summed from turns, such as usage per pull request, is recomputed from the stored events rather than added to as they arrive.
 
 ## Risks
 
