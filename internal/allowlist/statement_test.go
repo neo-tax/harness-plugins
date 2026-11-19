@@ -74,7 +74,10 @@ func TestStatementNamesIdentityLine(t *testing.T) {
 			t.Errorf("statement lacks %q", want)
 		}
 	}
-	if strings.Contains(s, "user.email") {
+	// Claude Code's telemetry carries its own user.email, the Claude account's;
+	// the git email must not appear anywhere before that section.
+	plugin, _, _ := strings.Cut(s, allowlist.TelemetryHeading)
+	if strings.Contains(plugin, "user.email") {
 		t.Error("statement still names the git email")
 	}
 }
@@ -105,5 +108,44 @@ func TestStatementListsNestedFieldsAtAnyDepth(t *testing.T) {
 	oneLevel := "| `usage` | Token counts. |\n| `usage.input_tokens` | Input tokens. |\n| `usage.cache` | Cache counts. |\n"
 	if missing := missingRows(oneLevel, "", fields); len(missing) != 1 || missing[0] != want {
 		t.Errorf("one-level rendering: missing %v, want only %q", missing, want)
+	}
+}
+
+// The telemetry section lists every attribute and metric the endpoint keeps,
+// and says that content is dropped even when the exporter sends it.
+//
+// @spec: claude-code-telemetry-export#privacy-statement-covers-telemetry
+func TestStatementCoversTelemetry(t *testing.T) {
+	s := allowlist.Statement()
+	_, section, ok := strings.Cut(s, allowlist.TelemetryHeading)
+	if !ok {
+		t.Fatal("statement has no telemetry section")
+	}
+	logs, metrics, ok := strings.Cut(section, "### Metrics")
+	if !ok {
+		t.Fatal("telemetry section has no metrics part")
+	}
+	for _, a := range allowlist.TelemetryLogAttributes {
+		if row := "| `" + a.Name + "` | " + a.Description + " |"; !strings.Contains(logs, row) {
+			t.Errorf("log records: missing row %q", row)
+		}
+	}
+	for _, list := range [][]allowlist.TelemetryAttribute{allowlist.TelemetryMetrics, allowlist.TelemetryMetricAttributes} {
+		for _, a := range list {
+			if row := "| `" + a.Name + "` | " + a.Description + " |"; !strings.Contains(metrics, row) {
+				t.Errorf("metrics: missing row %q", row)
+			}
+		}
+	}
+	for _, want := range []string{
+		"does not pass through the neo-tax plugin",
+		"Prompt text, response text, tool inputs and outputs, commands, file paths",
+		"before anything is stored. Prompt text",
+		"are dropped before anything is stored or logged, even when an administrator configures Claude Code to send them",
+		"telemetry identifies the engineer directly",
+	} {
+		if !strings.Contains(section, want) {
+			t.Errorf("telemetry section lacks %q", want)
+		}
 	}
 }

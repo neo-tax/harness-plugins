@@ -4,8 +4,8 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-10-24
-updated: 2026-11-15
-version: 6
+updated: 2026-11-17
+version: 7
 affects:
   - internal/queue/*.go
   - internal/enroll/*.go
@@ -26,11 +26,13 @@ Governs how a device obtains its device key: the enrollment token an admin mints
 - `token-scope`(built): An enrollment token can do nothing except enroll devices into the one organization it was minted for.
   - status-reason: unmerged: built in platform-new #5601, which is still open, and tested there in projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts: a token enrolls devices into its own organization only
 - `token-use-count-chosen-at-mint`(built): An admin chooses at mint time whether a token is single-use or multi-use.
-  - status-reason: unmerged: built in platform-new #5601, which is still open, and tested there in projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts; single_use is set at mint and enforced by a conditional update
-- `token-default-expiry`(built): An enrollment token expires seven days after mint unless the admin sets a different expiry.
-  - status-reason: unmerged: built in platform-new #5601, which is still open, in projects/server/src/harness-ingest/harness-enrollment.service.ts (DEFAULT_ENROLLMENT_TOKEN_TTL_MS); no test asserts the seven days
+  - status-reason: unmerged: built in platform-new #5737, stacked on #5601, both still open; the admin chooses in Organization Settings (projects/web-app/src/shared/organisms/organization-settings/HarnessEnrollmentSettings.tsx, tested in its __tests__/HarnessEnrollmentSettings.spec.tsx), and single_use is enforced by a conditional update, tested in projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts
+- `token-default-expiry`(built): An enrollment token expires seven days after mint unless the admin sets a different expiry, of at most 90 days.
+  - status-reason: unmerged: built in platform-new #5737, stacked on #5601, both still open; the default and the 90-day ceiling are tested in projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts
 - `token-revocable`(built): An admin can revoke an enrollment token before it expires, and revoking it does not affect devices already enrolled with it.
-  - status-reason: unmerged: built in platform-new #5601, which is still open, and tested there in projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts
+  - status-reason: unmerged: built in platform-new #5737, stacked on #5601, both still open; revoked from Organization Settings, and tested in projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts
+- `token-org-admin-only`(built): Only an admin of a token's organization can mint, list, or revoke its enrollment tokens; a Neo.Tax super user impersonating that admin cannot.
+  - status-reason: unmerged: built in platform-new #5737, stacked on #5601, both still open; tested in projects/server/test/test-new/harness-ingest/harness-enrollment-tokens.resolver.spec.ts, and platform-new's docs/specs/product/platform/ai-tokens-enrollment.spec.md owns the admin experience
 - `device-key-scope`(built): A device key authorizes session ingest only; it cannot read or write any other Neo.Tax resource.
   - status-reason: unmerged: built in platform-new #5601, which is still open, and tested there in projects/server/test/test-new/harness-ingest/harness-ingest.controller.spec.ts; only the harness ingest route looks a credential up in harness_devices
 - `device-key-revocable-individually`(built): Revoking one device key does not affect any other device key, including others minted from the same enrollment token.

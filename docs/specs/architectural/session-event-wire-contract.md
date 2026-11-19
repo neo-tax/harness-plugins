@@ -20,7 +20,7 @@ affects:
 
 Governs every request and response exchanged between the agent and Neo.Tax: the session event envelope, the four event kinds, the batched ingest request and its response, and the enrollment exchange. The contract is owned by this repository as JSON Schema.
 
-The plugin's ingest endpoint is one of Neo.Tax's two entry points into the session record. The other, governed by `otlp-ingest`, takes a harness's own OpenTelemetry export and does not use this contract; the two meet on the turn's call ids, response id first (`otlp-ingest#call-ids`).
+The plugin's ingest endpoint is one of Neo.Tax's two entry points into the session record. The other, governed by platform-new's `otlp-ingest`, takes a harness's own OpenTelemetry export and does not use this contract; the two meet on the turn's call ids, response id first (platform-new's `otlp-ingest#call-ids`).
 
 ## Requirements
 
@@ -82,7 +82,7 @@ The contract carries one event per assistant message rather than a cumulative pe
 
 `email_confirmed_by` is in the enrollment request from the first version even though v0.1 only ever sends `engineer`, so managed enrollment in v1.0 adds no server-side change.
 
-Harness-specific identifiers (`session_id`, `message_id`, `request_id`, `subagent_id`) are passed through as the harness produced them; the contract does not normalize them beyond requiring strings. The message id and request id are held to that most strictly (`claude-code-transcript-parser#message-id-is-provider-id`, `claude-code-transcript-parser#request-id-from-transcript`), because they are the model provider's own ids for the API call, which telemetry and gateways also carry: the server joins a turn from this contract with another source's record of the same call on them (`otlp-ingest#call-ids`), so a normalized or synthesized value would split one turn into two.
+Harness-specific identifiers (`session_id`, `message_id`, `request_id`, `subagent_id`) are passed through as the harness produced them; the contract does not normalize them beyond requiring strings. The message id and request id are held to that most strictly (`claude-code-transcript-parser#message-id-is-provider-id`, `claude-code-transcript-parser#request-id-from-transcript`), because they are the model provider's own ids for the API call, which telemetry and gateways also carry: the server joins a turn from this contract with another source's record of the same call on them (platform-new's `otlp-ingest#call-ids`), so a normalized or synthesized value would split one turn into two.
 
 Turns are keyed without the session because Claude Code copies a parent session's transcript into a fork: a capture on 2026-11-11, before the adapter skipped the copies, saw a fork re-send its parent's two turns with the same message and request ids under the fork's session id. Keyed by session, every copy the adapter misses would count its parent's usage again. A message id is the model provider's id for one response, so it names one turn on a device whichever session reports it. Pull request links keep the session, because a link is a fact about one session: a fork that links a pull request its parent also linked is linked to it too, and nothing is counted twice, since a link carries no usage.
 

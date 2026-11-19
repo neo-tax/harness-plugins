@@ -28,7 +28,7 @@ func load(t *testing.T) map[string]string {
 // HTTP, delta metrics, repository attributes on, and the ingest key as a
 // bearer token. Claude Code's default protocol is protobuf from 2.1.323, and
 // repository attributes are off by default.
-// @spec: otlp-ingest#managed-settings-exporter
+// @spec: claude-code-telemetry-export#managed-settings-exporter
 func TestManagedSettingsConfigureTheExporter(t *testing.T) {
 	env := load(t)
 	want := map[string]string{
@@ -60,7 +60,7 @@ func TestManagedSettingsConfigureTheExporter(t *testing.T) {
 
 // Content switches stay off, so Claude Code redacts prompts, responses,
 // tool details, and API bodies before they leave the machine.
-// @spec: otlp-ingest#managed-settings-no-content
+// @spec: claude-code-telemetry-export#managed-settings-no-content
 func TestManagedSettingsLeaveContentOff(t *testing.T) {
 	env := load(t)
 	for _, k := range []string{"OTEL_LOG_USER_PROMPTS", "OTEL_LOG_ASSISTANT_RESPONSES", "OTEL_LOG_TOOL_DETAILS", "OTEL_LOG_TOOL_CONTENT", "OTEL_LOG_RAW_API_BODIES"} {
