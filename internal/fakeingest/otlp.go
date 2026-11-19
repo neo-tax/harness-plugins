@@ -107,7 +107,7 @@ func attrs(kvs []otlpKeyValue) map[string]any {
 // otlp serves one OTLP/HTTP signal: authenticate, then content type, then
 // body, in that order.
 //
-// @spec: otlp-ingest#fake-ingest-accepts-otlp
+// @spec: claude-code-telemetry-export#fake-ingest-accepts-otlp
 func (s *Server) otlp(signal otlpSignal) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
