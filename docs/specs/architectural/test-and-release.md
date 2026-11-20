@@ -89,7 +89,7 @@ The agent is a static Go binary. It ships to every engineer's laptop, often push
 ### Cutting a release
 
 1. Open a pull request that sets `version` in every `plugins/*/.claude-plugin/plugin.json` to the new version (and, from v1.0, the metadata and plugin versions in `channels/latest/marketplace.json`). Leave `.claude-plugin/marketplace.json` alone; the pin sets it. `go run ./cmd/release-check vX.Y.Z` passes locally when the bump is complete.
-2. Merge it, then have an organization admin, the only role the `release-tags` ruleset lets create a `v*` tag, tag main's resulting commit and push the tag: `git tag vX.Y.Z <sha> && git push origin vX.Y.Z`.
+2. Merge it, then have an organization admin, the only role the `release-tags` ruleset lets create a `v*` tag, run `scripts/release.sh vX.Y.Z` from a clean, up-to-date checkout of main. It checks that main is green and the manifests match, tags main's tip with an annotated tag carrying that commit's message, pushes the tag, and follows the release workflow; `--dry-run` stops before tagging.
 3. Wait for the release workflow to finish. It fails before building if the tagged commit is not on main or the manifests disagree with the tag, and it opens no pin pull request if the fleet-style install of the published release fails.
 4. Approve and squash-merge the `Pin the marketplace to vX.Y.Z` pull request it opens. Until then engineers stay on the previous release. Pull requests opened with the workflow token do not trigger CI, so its required checks do not run on their own (see Risks).
 
