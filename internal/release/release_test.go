@@ -163,7 +163,7 @@ func TestPinIsForwardOnlyAndKeepsLayout(t *testing.T) {
 }
 
 func TestLatestChannelVersionsMustMatch(t *testing.T) {
-	root := repo(t, layout{version: "1.0.0", latestBytes: `{"name":"neo-tax-latest","metadata":{"version":"0.9.0"},"plugins":[{"name":"neo-tax","version":"0.9.0","source":{"source":"git-subdir","url":"neo-tax/harness-plugins","path":"plugins/claude-code","ref":"main"}}]}`})
+	root := repo(t, layout{version: "1.0.0", latestBytes: `{"name":"neo-tax-latest","metadata":{"version":"0.9.0"},"plugins":[{"name":"neo-tax","version":"0.9.0","source":{"source":"git-subdir","url":"https://github.com/neo-tax/harness-plugins.git","path":"plugins/claude-code","ref":"main"}}]}`})
 	if err := release.Check(root, "v1.0.0"); err == nil || !strings.Contains(err.Error(), "latest channel") {
 		t.Fatalf("err %v", err)
 	}

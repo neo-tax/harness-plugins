@@ -13,7 +13,7 @@
       "name": "neo-tax",
       "source": {
         "source": "git-subdir",
-        "url": "neo-tax/harness-plugins",
+        "url": "https://github.com/neo-tax/harness-plugins.git",
         "path": "plugins/claude-code",
         "ref": "v0.1.0"
       },

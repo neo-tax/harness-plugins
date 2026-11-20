@@ -21,8 +21,10 @@ import (
 	"strconv"
 )
 
-// Repository is this repository, the source of every released plugin.
-const Repository = "neo-tax/harness-plugins"
+// Repository is this repository, the source of every released plugin. It is
+// an HTTPS URL because Claude Code clones an owner/name shorthand over SSH,
+// which fails on machines without a GitHub SSH key.
+const Repository = "https://github.com/neo-tax/harness-plugins.git"
 
 var semver = regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)$`)
 
