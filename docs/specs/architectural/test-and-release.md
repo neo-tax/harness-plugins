@@ -96,6 +96,12 @@ The agent is a static Go binary. It ships to every engineer's laptop, often push
 
 The first release is the exception: `.claude-plugin/marketplace.json` already names `v0.1.0`, so until that tag is released an install resolves a tag that does not exist. v0.1.0 is tagged as soon as the v0.1 stack merges; its pin is then a no-op and no pull request is opened. A pre-release relative source would not help: the plugin's launcher downloads the agent from the GitHub release for the plugin's version, so an install before v0.1.0 exists has no binary either way.
 
+v1.0.0 is the other exception, because it is the release that adds the latest channel and the release script cannot cross it: `release-check -bump major` from 0.x fails because v1 requires `channels/latest/marketplace.json`, and adding that file to main while still on 0.x would make every 0.x release fail the single-channel check. So v1.0.0 is cut by hand:
+
+1. Open one pull request that sets every `plugins/*/.claude-plugin/plugin.json` to `1.0.0` and adds `channels/latest/marketplace.json` with metadata and plugin versions `1.0.0` and each plugin's source a `git-subdir` of this repository at `main`. `go run ./cmd/release-check v1.0.0` passes when it is complete.
+2. Once it merges, an organization admin tags main's tip right away: `git tag -a v1.0.0 -m "Version bump to 1.0.0"` and `git push origin refs/tags/v1.0.0`. Until the release is published, an install from the latest channel finds no v1.0.0 binary and runs nothing.
+3. Continue from step 2 of the procedure above. Every later release, majors included, goes through `scripts/release.sh`, which bumps the latest channel along with each `plugin.json`.
+
 ## Risks
 
 - **The anonymizer misses a content-bearing field in a new transcript format.** Real content lands in the repository. Mitigated by the anonymizer allowlisting fields to keep rather than denylisting fields to strip, so an unknown field is replaced by default.
