@@ -73,7 +73,7 @@ else
 fi
 
 claude plugin marketplace add "$market"
-claude plugin install neo-tax@neo-tax
+claude plugin install neo-tax@neo-tax-plugins
 
 # Enroll the way the login skill does: through the installed plugin's launcher
 # with no data directory given, so the launcher's fallback must match the
@@ -84,7 +84,7 @@ if [ -z "$launcher" ] && [ -z "$tag" ]; then
 fi
 [ -n "$launcher" ] || fail "the installed plugin has no bin/neo-tax-agent"
 echo smoke | "$launcher" login --server "http://127.0.0.1:$port" --token-stdin --email smoke@example.com
-data="$CLAUDE_CONFIG_DIR/plugins/data/neo-tax-neo-tax"
+data="$CLAUDE_CONFIG_DIR/plugins/data/neo-tax-neo-tax-plugins"
 if [ -n "$tag" ]; then
   # The launcher exits 0 when a download fails, so a missing binary would
   # otherwise only show up as a missing device.json.

@@ -7,8 +7,8 @@
 set -eu
 
 # Hooks pass the plugin data directory; a skill's Bash call does not, so
-# fall back to where Claude Code keeps data for neo-tax@neo-tax.
-NEO_TAX_DATA_DIR="${NEO_TAX_DATA_DIR:-${CLAUDE_PLUGIN_DATA:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/data/neo-tax-neo-tax}}"
+# fall back to where Claude Code keeps data for neo-tax@neo-tax-plugins.
+NEO_TAX_DATA_DIR="${NEO_TAX_DATA_DIR:-${CLAUDE_PLUGIN_DATA:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/data/neo-tax-neo-tax-plugins}}"
 export NEO_TAX_DATA_DIR
 
 if [ -n "${NEO_TAX_AGENT_BIN:-}" ]; then

@@ -112,7 +112,7 @@ func TestManifestsNameThePluginNeoTax(t *testing.T) {
 	}
 	b, _ = os.ReadFile("../.claude-plugin/marketplace.json")
 	json.Unmarshal(b, &m)
-	if p.Name != "neo-tax" || m.Name != "neo-tax" || len(m.Plugins) != 1 || m.Plugins[0].Name != "neo-tax" {
+	if p.Name != "neo-tax" || m.Name != "neo-tax-plugins" || len(m.Plugins) != 1 || m.Plugins[0].Name != "neo-tax" {
 		t.Fatalf("plugin %q marketplace %q %+v", p.Name, m.Name, m.Plugins)
 	}
 }
