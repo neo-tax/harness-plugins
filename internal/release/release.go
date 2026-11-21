@@ -1,6 +1,6 @@
-// Package release checks, before a tag is published, that the plugin
-// manifests agree with the tag, and pins the stable marketplace to the tag
-// once its release is published.
+// Package release bumps the plugin manifests to the next version, checks,
+// before a tag is published, that they agree with the tag, and pins the
+// stable marketplace to the tag once its release is published.
 //
 // Release procedure: bump plugins/*/.claude-plugin/plugin.json to the new
 // version on main, push the tag, and the release workflow checks, builds,
@@ -142,6 +142,72 @@ func checkMarketplace(root, label string, m manifest, version, ref string, versi
 		}
 	}
 	return errs
+}
+
+// Bump moves every released manifest to the next major, minor, or patch
+// version and returns the new tag: each plugin.json the stable marketplace
+// lists, and, when it exists, the latest channel's metadata and plugin
+// versions. The stable marketplace is left to Pin. It edits only version
+// values, keeping each file's layout, refuses plugins whose versions already
+// disagree, and fails if the result does not pass Check.
+//
+// @spec: test-and-release#release-bumps-version
+func Bump(root, kind string) (string, error) {
+	stable, err := read(filepath.Join(root, stablePath))
+	if err != nil {
+		return "", err
+	}
+	var paths []string
+	current := ""
+	for _, p := range stable.Plugins {
+		path := filepath.Join(root, p.Source.Path, ".claude-plugin", "plugin.json")
+		pm, err := read(path)
+		if err != nil {
+			return "", err
+		}
+		if current != "" && pm.Version != current {
+			return "", fmt.Errorf("plugin versions disagree (%q and %q); reconcile them first", current, pm.Version)
+		}
+		current = pm.Version
+		paths = append(paths, path)
+	}
+	if len(paths) == 0 {
+		return "", fmt.Errorf("%s lists no plugins", stablePath)
+	}
+	m := semver.FindStringSubmatch("v" + current)
+	if m == nil {
+		return "", fmt.Errorf("plugin version %q is not a stable version like 1.2.3", current)
+	}
+	var n [3]int
+	for i := range n {
+		n[i], _ = strconv.Atoi(m[i+1])
+	}
+	switch kind {
+	case "major":
+		n = [3]int{n[0] + 1, 0, 0}
+	case "minor":
+		n = [3]int{n[0], n[1] + 1, 0}
+	case "patch":
+		n[2]++
+	default:
+		return "", fmt.Errorf("release type %q is not major, minor, or patch", kind)
+	}
+	version := fmt.Sprintf("%d.%d.%d", n[0], n[1], n[2])
+	tag := "v" + version
+
+	if _, err := os.Stat(filepath.Join(root, latestPath)); err == nil {
+		paths = append(paths, filepath.Join(root, latestPath))
+	}
+	for _, path := range paths {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(path, versionField.ReplaceAll(b, []byte(`${1}"`+version+`"`)), 0o644); err != nil {
+			return "", err
+		}
+	}
+	return tag, Check(root, tag)
 }
 
 // Pin points the stable marketplace at tag: its version, each plugin's

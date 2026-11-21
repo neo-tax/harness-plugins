@@ -4,8 +4,8 @@ kind: architectural
 owner:
   - Firas Abuzaid
 created: 2026-10-24
-updated: 2026-11-15
-version: 6
+updated: 2026-11-20
+version: 7
 affects:
   - internal/fakeingest/*.go
   - .github/workflows/ci.yml
@@ -16,6 +16,7 @@ affects:
   - .github/workflows/release.yml
   - internal/release/*.go
   - cmd/release-check/*.go
+  - scripts/release.sh
   - scripts/smoke-test.sh
   - internal/specs/*.go
   - .claude-plugin/marketplace.json
@@ -61,6 +62,7 @@ Governs how the agent and plugins are tested, how a release is cut, and what art
 - `launcher-download-verified`(tested): The launcher downloads the binary named for the plugin's version and the machine's platform, runs it only when its SHA-256 matches the release's `checksums.txt`, and caches it for later runs. When the download or the check fails it runs nothing, caches nothing, and exits 0.
 - `fleet-install-before-pin`(built): After publish, the release workflow installs the plugin the way a fleet does: the marketplace's `git-subdir` source fetched from GitHub at the tag, and the launcher downloading and verifying the released binary. It enrolls against the fake ingest server and, when an API key is present, runs one prompt. The pin pull request opens only if this succeeds.
   - status-reason: the release workflow's fleet_install job runs scripts/smoke-test.sh with SMOKE_RELEASE_TAG; no release has run yet
+- `release-bumps-version`(tested): The release script moves every released `plugin.json`, and from v1.0 the latest channel marketplace's versions, to the next major, minor, or patch version, commits that bump to main as `Version bump to X.Y.Z`, and pushes it together with an annotated tag of the same message in one atomic push; the stable marketplace is left to the pin.
 - `manifest-version-matches-tag`(tested): The release workflow fails if the version in the `plugin.json` of any plugin a marketplace lists, or the latest channel marketplace's version, differs from the tag; a plugin directory no marketplace lists is not checked; the stable marketplace's version is set to the tag when the marketplace is pinned after publish.
 - `marketplace-source-is-this-repo`(tested): The marketplace manifest's source for each plugin is this repository at the released tag, so a harness's plugin auto-update follows releases.
 - `pin-through-pull-request`(built): The stable marketplace's pin reaches main through a pull request that the release workflow opens after publish, carrying one signed commit, and merging it needs one approval and the `test` and `plugin_validate` checks; the workflow never pushes to main.
@@ -82,16 +84,15 @@ Fixtures are the contract between the adapter and the harness: when a harness sh
 
 The install smoke test is the only test that exercises the harness's own hook dispatch; everything else stubs the harness by exec'ing the agent directly. On a pull request it installs the working tree and runs an agent built from it, because no release exists for that code yet. The launcher's download and checksum path is covered instead by a test that serves a fake release to the shipped launcher, changing only its release URL. After publish, the same script runs against the real release and the plugin source on GitHub, which is the only check of the whole path an engineer's machine takes. CI and the release install a fixed Claude Code version, so an upstream release can't turn every pull request red; moving it is a deliberate change.
 
-Workflows pin actions to commit SHAs because a tag can be moved to other code, and the release workflow hands signing secrets to a third-party action whose output is published. The ancestry check keeps a release to code that reached main through review; who may push a `v*` tag at all is the `release-tags` ruleset on `refs/tags/v*`, which blocks creating, moving, and deleting those tags for everyone but organization admins, since the workflow cannot enforce it.
+Workflows pin actions to commit SHAs because a tag can be moved to other code, and the release workflow hands signing secrets to a third-party action whose output is published. The ancestry check keeps a release to code that reached main through review, plus the version-only bump commit the release script adds; who may push a `v*` tag at all is the `release-tags` ruleset on `refs/tags/v*`, which blocks creating, moving, and deleting those tags for everyone but organization admins, since the workflow cannot enforce it.
 
 The agent is a static Go binary. It ships to every engineer's laptop, often pushed by a customer's IT through device management, so it must run with no runtime present and be small enough to live in every harness's plugin cache: Go cross-compiles to roughly 10 MB static binaries per target with no toolchain work, signs and notarizes cleanly, and is the conventional choice for fleet-deployed agents, which makes it the easiest story for a customer's security review. Nobody on the team has Go experience, so the binary is kept deliberately small (hook glue, transcript parsing, queue, HTTP client). The choice stays cheap to reverse only while two boundaries hold: the wire contract is specified in JSON Schema and never derived from Go types, and the harness boundary is exec-the-binary-with-the-event-on-argv-and-the-payload-on-stdin. With those held, swapping the language is a rewrite of one binary against the existing fixtures, and the end-to-end test above is what proves the boundary is honored.
 
 ### Cutting a release
 
-1. Open a pull request that sets `version` in every `plugins/*/.claude-plugin/plugin.json` to the new version (and, from v1.0, the metadata and plugin versions in `channels/latest/marketplace.json`). Leave `.claude-plugin/marketplace.json` alone; the pin sets it. `go run ./cmd/release-check vX.Y.Z` passes locally when the bump is complete.
-2. Merge it, then have an organization admin, the only role the `release-tags` ruleset lets create a `v*` tag, run `scripts/release.sh vX.Y.Z` from a clean, up-to-date checkout of main. It checks that main is green and the manifests match, tags main's tip with an annotated tag carrying that commit's message, pushes the tag, and follows the release workflow; `--dry-run` stops before tagging.
-3. Wait for the release workflow to finish. It fails before building if the tagged commit is not on main or the manifests disagree with the tag, and it opens no pin pull request if the fleet-style install of the published release fails.
-4. Approve and squash-merge the `Pin the marketplace to vX.Y.Z` pull request it opens. Until then engineers stay on the previous release. Pull requests opened with the workflow token do not trigger CI, so its required checks do not run on their own (see Risks).
+1. Have an organization admin, the only role the `release-tags` ruleset lets create a `v*` tag and the only one that bypasses main's ruleset, run `scripts/release.sh [major|minor|patch]` from a clean, up-to-date checkout of main; it asks for the release type when none is given. It checks that main is green, sets `version` in every `plugins/*/.claude-plugin/plugin.json` (and, from v1.0, the metadata and plugin versions in `channels/latest/marketplace.json`) with `go run ./cmd/release-check -bump`, leaves `.claude-plugin/marketplace.json` for the pin, commits `Version bump to X.Y.Z`, tags that commit with the same message, pushes main and the tag atomically, and follows the release workflow. `--dry-run` shows the bump and reverts it without committing or pushing.
+2. Wait for the release workflow to finish. It fails before building if the tagged commit is not on main or the manifests disagree with the tag, and it opens no pin pull request if the fleet-style install of the published release fails.
+3. Approve and squash-merge the `Pin the marketplace to vX.Y.Z` pull request it opens. Until then engineers stay on the previous release. Pull requests opened with the workflow token do not trigger CI, so its required checks do not run on their own (see Risks).
 
 The first release is the exception: `.claude-plugin/marketplace.json` already names `v0.1.0`, so until that tag is released an install resolves a tag that does not exist. v0.1.0 is tagged as soon as the v0.1 stack merges; its pin is then a no-op and no pull request is opened. A pre-release relative source would not help: the plugin's launcher downloads the agent from the GitHub release for the plugin's version, so an install before v0.1.0 exists has no binary either way.
 
@@ -100,5 +101,5 @@ The first release is the exception: `.claude-plugin/marketplace.json` already na
 - **The anonymizer misses a content-bearing field in a new transcript format.** Real content lands in the repository. Mitigated by the anonymizer allowlisting fields to keep rather than denylisting fields to strip, so an unknown field is replaced by default.
 - **The smoke test depends on the harness being installable in CI.** A harness release that breaks headless install blocks releases. CI pins the Claude Code version, so this bites only when the pin is moved. Accepted; the pull request job can be marked required only once it has been stable for a release cycle.
 - **The fleet install needs the repository to be public.** It clones the plugin source and downloads the binary with no credential, as engineers' machines do. While the repository is private both fail, the job fails, and no pin pull request opens. The repository goes public before v0.1.0 is tagged.
-- **An organization admin can start a release.** The `release-tags` ruleset leaves creating a `v*` tag to organization admins, who also bypass main's ruleset. The ancestry check limits a release to commits on main, so the worst case short of an admin bypassing review is releasing reviewed code early.
+- **An organization admin can start a release.** The `release-tags` ruleset leaves creating a `v*` tag to organization admins, who also bypass main's ruleset. The ancestry check limits a release to commits on main, so the worst case short of an admin bypassing review is releasing reviewed code early. The release script's own bump commit reaches main without a pull request; `release-check -bump` changes only version values, and the release workflow checks and tests the tagged tree again.
 - **The pin pull request's required checks never start.** main requires `test` and `plugin_validate`, but a pull request opened with the workflow token triggers no workflow, so the pin cannot merge as opened. Until the workflow opens it with a token that triggers CI, someone must start the checks by hand (closing and reopening it does) or an admin must bypass them.

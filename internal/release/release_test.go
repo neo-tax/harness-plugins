@@ -168,3 +168,43 @@ func TestLatestChannelVersionsMustMatch(t *testing.T) {
 		t.Fatalf("err %v", err)
 	}
 }
+
+// Bump moves plugin.json and the latest channel to the next version, keeping
+// the stable marketplace for Pin, and rejects what it cannot bump.
+// @spec: test-and-release#release-bumps-version
+func TestBump(t *testing.T) {
+	cases := []struct {
+		kind, from, want string
+		latest           bool
+	}{
+		{"patch", "0.1.0", "v0.1.1", false},
+		{"minor", "0.1.3", "v0.2.0", false},
+		{"major", "1.2.3", "v2.0.0", true},
+	}
+	for _, c := range cases {
+		root := repo(t, layout{version: c.from, latest: c.latest})
+		stableBefore, _ := os.ReadFile(filepath.Join(root, ".claude-plugin/marketplace.json"))
+		tag, err := release.Bump(root, c.kind)
+		if err != nil || tag != c.want {
+			t.Fatalf("%s %s: got %q, %v; want %q", c.kind, c.from, tag, err, c.want)
+		}
+		if err := release.Check(root, tag); err != nil {
+			t.Fatalf("%s %s: bumped manifests fail Check: %v", c.kind, c.from, err)
+		}
+		stableAfter, _ := os.ReadFile(filepath.Join(root, ".claude-plugin/marketplace.json"))
+		if string(stableBefore) != string(stableAfter) {
+			t.Fatalf("%s %s: bump changed the stable marketplace", c.kind, c.from)
+		}
+	}
+
+	for _, c := range []struct{ name, kind, from, wantErr string }{
+		{"bad kind", "huge", "0.1.0", "not major, minor, or patch"},
+		{"prerelease", "patch", "0.1.0-rc.1", "not a stable version"},
+		{"v0 to v1 without latest channel", "major", "0.9.0", "is missing"},
+	} {
+		_, err := release.Bump(repo(t, layout{version: c.from}), c.kind)
+		if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+			t.Errorf("%s: err %v, want %q", c.name, err, c.wantErr)
+		}
+	}
+}
