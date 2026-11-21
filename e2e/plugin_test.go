@@ -66,8 +66,9 @@ func TestHookRegistrations(t *testing.T) {
 // agent command of the same name.
 // @spec: device-enrollment#login-skill-delegates-to-agent
 // @spec: event-queue-and-backfill#backfill-command
+// @spec: session-list#sessions-command
 func TestSkillsDelegateToAgent(t *testing.T) {
-	for _, name := range []string{"login", "backfill"} {
+	for _, name := range []string{"login", "backfill", "sessions"} {
 		b, err := os.ReadFile(pluginDir + "/skills/" + name + "/SKILL.md")
 		if err != nil {
 			t.Fatal(err)
@@ -77,7 +78,7 @@ func TestSkillsDelegateToAgent(t *testing.T) {
 			t.Errorf("skill is not named %s", name)
 		}
 		blocks := regexp.MustCompile("(?s)```bash\n(.*?)```").FindAllStringSubmatch(s, -1)
-		want := map[string]string{"login": "login", "backfill": "backfill --background"}[name]
+		want := map[string]string{"login": "login", "backfill": "backfill --background", "sessions": "sessions"}[name]
 		if len(blocks) != 1 || strings.TrimSpace(blocks[0][1]) != `"${CLAUDE_SKILL_DIR}/../../bin/neo-tax-agent" `+want {
 			t.Fatalf("%s code blocks %q", name, blocks)
 		}

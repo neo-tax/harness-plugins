@@ -17,7 +17,9 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"text/tabwriter"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/term"
 
@@ -38,7 +40,9 @@ commands:
   login        enroll this device with an enrollment token, then start a backfill
   backfill     send events for transcripts not yet read, continuing a paused
                backfill where it stopped (--restart resends every transcript)
-  version    print the agent version
+  sessions     list recent sessions with their titles and whether they were
+               reported; titles are shown here only and never sent
+  version      print the agent version
 `
 
 func main() {
@@ -60,6 +64,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return hook(args[1:], stdin)
 	case "backfill":
 		return backfill(args[1:], stdout, stderr)
+	case "sessions":
+		return sessions(args[1:], stdout, stderr)
 	default:
 		fmt.Fprint(stderr, usage)
 		return 2
@@ -295,4 +301,54 @@ func backfill(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// sessions prints the engineer's recent sessions with their titles, so they
+// can match what Neo.Tax shows to conversations they remember. Titles go to
+// stdout only, never to a log line.
+//
+// @spec: session-list#sessions-command
+// @spec: session-list#title-local-only
+func sessions(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("sessions", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("data-dir", "", "plugin data directory (default $CLAUDE_PLUGIN_DATA)")
+	limit := fs.Int("limit", 20, "how many sessions to list; 0 lists every session")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *limit < 0 {
+		fmt.Fprintln(stderr, "neo-tax-agent: --limit must be 0 or more")
+		return 2
+	}
+	list := claudecode.ListSessions(claudecode.ListOptions{DataDir: dataDir(*dir), Limit: *limit})
+	if len(list) == 0 {
+		fmt.Fprintln(stdout, "No Claude Code sessions found on this machine.")
+		return 0
+	}
+	w := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "LAST ACTIVE\tSESSION\tSTATUS\tBRANCH\tTITLE")
+	for _, s := range list {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", s.LastActive.Local().Format("2006-01-02 15:04"), s.SessionID, s.Status,
+			truncate(oneLine(s.Branch), 30), truncate(oneLine(s.Title), 70))
+	}
+	w.Flush()
+	return 0
+}
+
+// oneLine replaces tabs and line breaks, which would break the table.
+func oneLine(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\t' || r == '\n' || r == '\r' {
+			return ' '
+		}
+		return r
+	}, s)
+}
+
+func truncate(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	return string([]rune(s)[:n-1]) + "…"
 }
