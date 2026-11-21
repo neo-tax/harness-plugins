@@ -84,9 +84,9 @@ wait_http() {
 # Whether the engineer's own config has neo-tax, as Claude Code records it.
 neo_tax_installed() {
   p="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins"
-  [ -e "$p/data/neo-tax-neo-tax" ] \
-    || jq -e '.plugins // {} | has("neo-tax@neo-tax")' "$p/installed_plugins.json" >/dev/null 2>&1 \
-    || jq -e 'has("neo-tax")' "$p/known_marketplaces.json" >/dev/null 2>&1
+  [ -e "$p/data/neo-tax-neo-tax-plugins" ] \
+    || jq -e '.plugins // {} | has("neo-tax@neo-tax-plugins")' "$p/installed_plugins.json" >/dev/null 2>&1 \
+    || jq -e 'has("neo-tax-plugins")' "$p/known_marketplaces.json" >/dev/null 2>&1
 }
 
 up() {
@@ -157,9 +157,9 @@ up() {
     mkdir -p "$dev/claude"
     echo "$dev/claude" >"$dev/config-dir"
   fi
-  with_config claude plugin marketplace remove neo-tax >/dev/null 2>&1 || true
+  with_config claude plugin marketplace remove neo-tax-plugins >/dev/null 2>&1 || true
   with_config claude plugin marketplace add "$market" >/dev/null
-  with_config claude plugin install neo-tax@neo-tax >/dev/null
+  with_config claude plugin install neo-tax@neo-tax-plugins >/dev/null
   echo "dev: plugin installed from this working tree"
 
   email=$(git -C "$repo" config user.email 2>/dev/null || echo dev@example.com)
@@ -358,10 +358,10 @@ down() {
     rm -f "$dev/$p.pid"
   done
   if [ -f "$dev/config-dir" ]; then
-    with_config claude plugin uninstall neo-tax@neo-tax >/dev/null 2>&1 || true
-    with_config claude plugin marketplace remove neo-tax >/dev/null 2>&1 || true
+    with_config claude plugin uninstall neo-tax@neo-tax-plugins >/dev/null 2>&1 || true
+    with_config claude plugin marketplace remove neo-tax-plugins >/dev/null 2>&1 || true
     c=$(config_dir)
-    rm -rf "${c:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/plugins/data/neo-tax-neo-tax"
+    rm -rf "${c:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/plugins/data/neo-tax-neo-tax-plugins"
   fi
   if [ "${1:-}" = --clean ]; then
     rm -rf "$dev"

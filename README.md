@@ -1,81 +1,121 @@
-# harness-plugins
+# Neo.Tax plugin for AI coding tools
 
-The code that runs on an engineer's machine to observe AI coding sessions and report their metadata to Neo.Tax. One shared agent, one wire contract, a thin adapter per coding harness.
+The `neo-tax` plugin reports **metadata** about AI coding sessions (token counts, model, repository, and branch) to Neo.Tax, so a company can see how much AI spend went into each pull request, ticket, and project. Nobody has to tag anything by hand.
 
-Neo.Tax uses the reported sessions to attribute AI token spend to the pull requests, tickets, and projects it already tracks, so a customer sees per-project AI cost next to engineering effort without anyone tagging anything.
+It never sends your prompts, Claude's responses, your code, tool inputs or outputs, file paths, or session titles.
 
-## Status
+Today it supports [Claude Code](https://claude.com/claude-code), with [Codex](https://openai.com/codex) support coming soon.
 
-v0.1 implemented, not yet released. The agent (`cmd/neo-tax-agent`), the wire contract (`contract/`), the Claude Code adapter (`internal/adapter/claudecode`), the plugin (`plugins/claude-code`), and the fake ingest server (`cmd/fake-ingest`) are built against the specs; each requirement's status is in its spec.
+This page is written for engineers and IT or security admins evaluating the plugin. If you want to work on the code, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-```
-go test ./...                       # unit, contract, fixture, end-to-end, and spec-traceability tests
-go run ./cmd/fake-ingest -record -  # see exactly what the plugin sends
-go run ./cmd/privacy-statement      # the privacy statement, generated from the field allowlist
-```
+## What it collects
 
-## What ships
-
-| Piece | What it is |
+| Sent to Neo.Tax | Never leaves the machine |
 | --- | --- |
-| `neo-tax-agent` | A static Go binary every adapter execs. Owns the field allowlist, the on-disk queue, flushing to Neo.Tax, enrollment, and transcript backfill. |
-| Wire contract | JSON Schema for every request and response between the agent and Neo.Tax, versioned by `contract_version`. Neo.Tax's server validates against a pinned copy. |
-| Adapters | Per-harness hook registrations and transcript parsing that turn a harness's payloads into normalized session events. Claude Code first; Gemini CLI next; Codex, Cursor, and OpenCode when a customer asks. |
-| Plugins | The installable unit each harness sees, named `neo-tax` on every harness, bundling the agent and one adapter. |
-| Fake ingest server | A stand-in for Neo.Tax that validates the wire contract and records what it receives. Used by tests, dogfooding, and any security team that wants to see exactly what the plugin sends. |
+| Token counts per model response, split by cache tier | Prompt text |
+| Model name and pricing tier (e.g. fast mode) | Response text |
+| Repository host, owner, and name, from the git remote | Source code |
+| Branch name and current commit hash | Tool inputs and outputs (commands, file contents) |
+| Pull request numbers the session touched | File paths and the working directory |
+| Session id, timestamps, and Claude Code version | Session titles |
+| A random device id | |
+
+At login, the engineer confirms their email, and the plugin sends it once along with the machine's hostname, OS, and CPU architecture. That email is stored with the device's key on Neo.Tax's side. It is not attached to each event.
+
+**[PRIVACY.md](PRIVACY.md) is the complete list**, field by field. It's generated from the allowlist built into the plugin: any field not on it is removed on the engineer's machine before it's written to disk or sent. A test fails if the published list and the code ever disagree.
+
+A few fields can identify a person even though they aren't meant to: branch names are free text, a repository owner can be a personal GitHub username, and hostnames often contain a name. PRIVACY.md calls these out.
 
 ## How it works
 
-1. An admin mints an enrollment token in Neo.Tax. An engineer runs `/neo-tax:login` in their harness, pastes it, and confirms their email. The device receives its own key, scoped to session ingest only.
-2. The harness's lifecycle hooks exec the agent with the hook name on the command line and the harness payload on stdin. The agent reads the session transcript from its last cursor and emits one event per assistant turn: token usage by cache tier, model, repository, branch, and head commit.
-3. Events pass through the allowlist, queue to disk, and flush in batches. Neo.Tax joins each session to a pull request by repository and branch, then to a ticket through its existing PR links, and prices each turn.
+1. An admin creates an enrollment token in Neo.Tax and shares it with their team.
+2. Each engineer installs the plugin and runs `/neo-tax:login`. A browser page opens where they paste the token and confirm their email. The machine gets its own key, which can only submit session metadata.
+3. From then on, Claude Code runs the plugin at the start and end of each session and after each response. The plugin reads Claude Code's local session log, keeps only the allowlisted fields, queues them on disk, and sends them in batches.
+4. On login, the plugin also backfills metadata for past Claude Code sessions on the machine, so Neo.Tax can see earlier usage.
 
-No session event the agent sends carries prompt text, completion text, tool inputs, file paths, working-directory paths, or session titles. The published privacy statement's session-event and enrollment sections are generated from the allowlist in the agent and the contract, so they cannot drift; its telemetry section is kept by hand from the endpoint's mappings. With telemetry enabled, Claude Code's own exporter also sends its usage telemetry to Neo.Tax directly, without passing through the agent; platform-new's `docs/specs/architectural/platform/otlp-ingest.spec.md` governs what that path keeps, and `docs/specs/architectural/claude-code-telemetry-export.md` what this repository ships for it.
+The plugin is designed to stay out of the way. It runs in the background, never blocks Claude Code, and if it can't download, enroll, or reach Neo.Tax, it fails quietly and retries later.
 
-## Reading this repository
+### Network access
 
-- `CONTEXT.md` is the glossary. Its terms are the vocabulary for every spec, commit, and conversation.
-- `docs/specs/architectural/` holds one spec per subsystem: the wire contract, device enrollment, the Claude Code transcript parser, repository and branch identity, the event queue and backfill, the field allowlist, and test and release. Each requirement line carries a status; where code and spec disagree, the code is wrong.
-- `AGENTS.md` is the operating guide for anyone, human or agent, making changes.
+| Destination | When |
+| --- | --- |
+| `github.com` (this repository's releases) | Once per plugin version, to download the agent binary. The download is checked against the release's SHA-256 checksums. |
+| `api.neo.tax/harness` | At login, and when sending session metadata. |
+| `api.neo.tax/otlp` | Only if your organization turns on Claude Code's own telemetry (see below). |
 
-## Trying it locally
+### Files on disk
 
-`scripts/dev.sh` runs the plugin from your working tree against the fake ingest server, so nothing reaches Neo.Tax. It needs `go`, `jq`, `curl`, and `claude`.
+Everything lives in Claude Code's plugin data directory, `~/.claude/plugins/data/neo-tax-neo-tax-plugins/`: the downloaded agent binary, the device key, the outgoing queue, a record of how far each session log has been read, and a log file. The log never contains prompt text, response text, tool inputs, or file paths.
+
+## See exactly what it sends
+
+You don't have to take our word for it. This repository includes a fake Neo.Tax server that accepts the same requests and prints everything it receives:
 
 ```sh
-scripts/dev.sh up          # build, start the fake server, install the plugin, enroll
-scripts/dev.sh claude      # Claude Code wired to the stack; log in to Claude the first time
-scripts/dev.sh events -f   # in another terminal: each event as it arrives
-scripts/dev.sh down        # stop and uninstall; --clean also deletes .dev/
+go run ./cmd/fake-ingest -record -
 ```
 
-Claude Code runs from a throwaway config directory under `.dev/`, so your own sessions and plugins are untouched. `up --my-config` installs into your real `~/.claude` instead, and enrolling then backfills your past sessions to the fake server. It replaces any neo-tax install there: your regular `claude` sessions then report to the fake server too, and `down` deletes the enrollment and any queued events. It refuses if neo-tax is already installed unless you pass `--force`.
+[CONTRIBUTING.md](CONTRIBUTING.md#trying-it-locally) shows how to point a local Claude Code install at it with `scripts/dev.sh`, so you can watch each event arrive while you work. The agent is a single Go binary with no network calls beyond the ones listed above, and the source is all here.
 
-To check token counts against the API's own, start with `up --audit`. Claude Code then talks to the API through a local proxy that logs the usage of every request (ids and counts only, never content), and `scripts/dev.sh audit` reports the requests no `session.turn` accounted for and any counts that differ.
+## Installing
 
-`go test ./...` runs everything else; `scripts/smoke-test.sh` is the scripted install check CI runs.
+### One engineer
 
-## Installing (once released)
-
-Per engineer, from inside Claude Code:
+From inside Claude Code:
 
 ```
 /plugin marketplace add neo-tax/harness-plugins
-/plugin install neo-tax@neo-tax
+/plugin install neo-tax@neo-tax-plugins
 /neo-tax:login
 ```
 
-Fleet-wide, through managed settings:
+### Across your organization
+
+Add this to your Claude Code [managed settings](https://docs.claude.com/en/docs/claude-code/settings) to install the plugin for everyone:
 
 ```json
 {
   "extraKnownMarketplaces": {
-    "neo-tax": { "source": { "source": "github", "repo": "neo-tax/harness-plugins" } }
+    "neo-tax-plugins": { "source": { "source": "github", "repo": "neo-tax/harness-plugins" } }
   },
-  "enabledPlugins": { "neo-tax@neo-tax": true }
+  "enabledPlugins": { "neo-tax@neo-tax-plugins": true }
 }
 ```
 
+Each engineer still runs `/neo-tax:login` once per machine. Nothing is sent from a machine that hasn't enrolled.
+
+### Optional: Claude Code's own telemetry
+
+Claude Code can export its own usage telemetry over OpenTelemetry. If you want Neo.Tax to receive it, [`deploy/claude-code/managed-settings.json`](deploy/claude-code/managed-settings.json) has the settings to add, with your organization's ingest key from Neo.Tax.
+
+This is separate from the plugin and goes straight from Claude Code to Neo.Tax. Two things to know:
+- Claude Code's prompt and tool-detail logging stays off, and Neo.Tax's server discards everything except the attributes listed in [PRIVACY.md](PRIVACY.md#claude-codes-own-telemetry) before storing anything.
+- Unlike the plugin's events, this telemetry carries the email of the engineer's Claude account on every record.
+
+## Uninstalling
+
+From inside Claude Code:
+
+```
+/plugin uninstall neo-tax@neo-tax-plugins
+```
+
+Then delete `~/.claude/plugins/data/neo-tax-neo-tax-plugins/` to remove the device key and any unsent events. For a fleet install, remove the `enabledPlugins` entry from managed settings.
+
 ## Releases
 
-A semantic-version tag builds the agent and the fake ingest server for macOS (arm64, amd64), Linux (amd64, arm64), and Windows (amd64), attaches them to a GitHub release, and then opens a pull request that pins the marketplace to the tag; merging it (one approval) moves every install to the release. The step-by-step procedure is under "Cutting a release" in `docs/specs/architectural/test-and-release.md`.
+Each release is a tagged GitHub release with binaries for macOS (Apple silicon and Intel), Linux (x86-64 and ARM64), and Windows (x86-64), plus SHA-256 checksums. Installs only move to a new version when the marketplace in this repository is updated to point at it.
+
+## Coming soon
+
+- **Codex support.** The same kind of session metadata, reported from OpenAI's Codex.
+
+## Questions
+
+For questions about the plugin, email [support@neo.tax](mailto:support@neo.tax).
+
+To report a security issue, email [security@neo.tax](mailto:security@neo.tax) rather than opening a public issue. See [SECURITY.md](SECURITY.md).
+
+## License
+
+[MIT](LICENSE)

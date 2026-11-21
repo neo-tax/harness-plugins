@@ -18,7 +18,7 @@ Code that runs on an engineer's machine to observe AI coding sessions and report
 
 ## Hard rules
 
-- The plugin, marketplace, skill prefix, and binary are all spelled `neo-tax`. Fleet install references the plugin as `neo-tax@neo-tax`.
+- The plugin, skill prefix, and binary are all spelled `neo-tax`; the marketplace is `neo-tax-plugins`. Fleet install references the plugin as `neo-tax@neo-tax-plugins`.
 - The wire contract is the JSON Schema under `contract/`. Go types are written to match it; the contract test proves they do. A schema change is a change here first.
 - The field allowlist in the agent is the privacy statement for session events. Every event field an adapter emits passes through it, and the statement's session-event and enrollment sections are generated from it and the contract. Its telemetry section is the exception: it is written by hand from the endpoint's mappings in platform-new (`claude-code-telemetry-export#privacy-statement-covers-telemetry`), and changes when they do.
 - GitHub Actions use snake_case, never kebab-case: workflow file names, job ids, step ids, and concurrency groups (`.github/workflows/claude_code_review.yml`, job `claude_review`).
