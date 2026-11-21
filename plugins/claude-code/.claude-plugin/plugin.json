@@ -1,6 +1,6 @@
 {
   "name": "neo-tax",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Reports Claude Code session metadata (token usage, model, repository, branch) to Neo.Tax. No prompts, code, or file paths leave the machine.",
   "author": {
     "name": "Neo.Tax",
