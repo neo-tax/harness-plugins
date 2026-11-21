@@ -12,6 +12,7 @@ import (
 
 type layout struct {
 	version     string // plugin.json version
+	stable      string // version the stable marketplace is pinned to; version when empty
 	pluginName  string
 	source      map[string]any
 	latest      bool
@@ -29,21 +30,25 @@ func write(t *testing.T, root, path string, v any) {
 	os.WriteFile(filepath.Join(root, path), b, 0o644)
 }
 
-// repo writes a repository layout. The stable marketplace still names the
-// previous release, as it does on main until a release is published.
+// repo writes a repository layout. The stable marketplace is pinned to the
+// plugin's version, as it is on main and on every tagged release commit,
+// unless the layout names another version.
 func repo(t *testing.T, l layout) string {
 	t.Helper()
 	root := t.TempDir()
 	if l.pluginName == "" {
 		l.pluginName = "neo-tax"
 	}
+	if l.stable == "" {
+		l.stable = l.version
+	}
 	if l.source == nil {
-		l.source = defaultSource("v0.0.9")
+		l.source = defaultSource("v" + l.stable)
 	}
 	write(t, root, "plugins/claude-code/.claude-plugin/plugin.json", map[string]any{"name": l.pluginName, "version": l.version})
 	write(t, root, ".claude-plugin/marketplace.json", map[string]any{
-		"name": "neo-tax", "owner": map[string]any{"name": "Neo.Tax"}, "metadata": map[string]any{"version": "0.0.9"},
-		"plugins": []any{map[string]any{"name": "neo-tax", "version": "0.0.9", "description": "d", "source": l.source}},
+		"name": "neo-tax", "owner": map[string]any{"name": "Neo.Tax"}, "metadata": map[string]any{"version": l.stable},
+		"plugins": []any{map[string]any{"name": "neo-tax", "version": l.stable, "description": "d", "source": l.source}},
 	})
 	switch {
 	case l.latestBytes != "":
@@ -74,6 +79,8 @@ func TestCheck(t *testing.T) {
 		{"plugin version differs", repo(t, layout{version: "0.1.0"}), "v0.2.0", "version"},
 		{"github source", repo(t, layout{version: "0.1.0", source: map[string]any{"source": "github", "repo": release.Repository}}), "v0.1.0", "git-subdir"},
 		{"fork", repo(t, layout{version: "0.1.0", source: map[string]any{"source": "git-subdir", "url": "someone/fork", "path": "plugins/claude-code"}}), "v0.1.0", "git-subdir"},
+		{"stable not pinned", repo(t, layout{version: "0.1.0", stable: "0.0.9"}), "v0.1.0", "version"},
+		{"stable ref differs", repo(t, layout{version: "0.1.0", source: defaultSource("v0.0.9")}), "v0.1.0", "source ref"},
 		{"plugin renamed", repo(t, layout{version: "0.1.0", pluginName: "other"}), "v0.1.0", "plugin.json is"},
 		{"v0 has latest channel", repo(t, layout{version: "0.1.0", latest: true}), "v0.1.0", "single channel"},
 		{"v0 malformed latest", repo(t, layout{version: "0.1.0", latestBytes: "{"}), "v0.1.0", "channels/latest/marketplace.json"},
@@ -97,7 +104,7 @@ func TestCheck(t *testing.T) {
 // @spec: test-and-release#marketplace-source-is-this-repo
 // @spec: test-and-release#single-channel-v0-1
 func TestPin(t *testing.T) {
-	root := repo(t, layout{version: "0.2.0"})
+	root := repo(t, layout{version: "0.2.0", stable: "0.0.9"})
 	if err := release.Pin(root, "v0.2.0"); err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +150,7 @@ func TestRepositoryManifests(t *testing.T) {
 // Pin never moves the marketplace to an older release, and changes nothing
 // but version and ref values.
 func TestPinIsForwardOnlyAndKeepsLayout(t *testing.T) {
-	root := repo(t, layout{version: "0.2.0"})
+	root := repo(t, layout{version: "0.2.0", stable: "0.0.9"})
 	path := filepath.Join(root, ".claude-plugin/marketplace.json")
 	before, _ := os.ReadFile(path)
 	if err := release.Pin(root, "v0.0.8"); err == nil || !strings.Contains(err.Error(), "older") {
@@ -169,8 +176,9 @@ func TestLatestChannelVersionsMustMatch(t *testing.T) {
 	}
 }
 
-// Bump moves plugin.json and the latest channel to the next version, keeping
-// the stable marketplace for Pin, and rejects what it cannot bump.
+// Bump moves plugin.json, the latest channel, and the stable marketplace's
+// pin to the next version in one change, touching nothing else in the stable
+// marketplace, and rejects what it cannot bump.
 // @spec: test-and-release#release-bumps-version
 func TestBump(t *testing.T) {
 	cases := []struct {
@@ -192,8 +200,9 @@ func TestBump(t *testing.T) {
 			t.Fatalf("%s %s: bumped manifests fail Check: %v", c.kind, c.from, err)
 		}
 		stableAfter, _ := os.ReadFile(filepath.Join(root, ".claude-plugin/marketplace.json"))
-		if string(stableBefore) != string(stableAfter) {
-			t.Fatalf("%s %s: bump changed the stable marketplace", c.kind, c.from)
+		want := strings.NewReplacer(`"`+c.from+`"`, `"`+tag[1:]+`"`, `"v`+c.from+`"`, `"`+tag+`"`).Replace(string(stableBefore))
+		if string(stableAfter) != want {
+			t.Fatalf("%s %s: stable marketplace\n%s\nwant\n%s", c.kind, c.from, stableAfter, want)
 		}
 	}
 

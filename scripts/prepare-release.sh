@@ -1,19 +1,24 @@
 #!/bin/sh
-# Cuts a release: bumps the plugin manifests on main to the next version,
-# commits the bump, tags it with an annotated tag carrying that commit's
-# message, pushes both, and follows the release workflow the tag starts.
+# Prepares a release: on a release branch off main's tip, commits one bump of
+# the plugin manifests to the next version, the stable marketplace's pin
+# included, tags that commit with an annotated tag carrying its message,
+# pushes both, and follows the release workflow the tag starts, which opens
+# the release pull request. scripts/finish-release.sh then fast-forwards main
+# to the commit, which is what rolls the release out.
 #
-#   scripts/release.sh [--dry-run] [major|minor|patch]
+#   scripts/prepare-release.sh [--dry-run] [major|minor|patch]
 #
 # Asks for the release type when it is not given. Only an organization admin
-# can run it to the end: the bump commit goes straight to main and the v* tag
-# is guarded by the release-tags ruleset, and admins bypass both. --dry-run
-# runs every check and shows the bump without committing, tagging, or pushing.
+# can run it to the end: the v* tag is guarded by the release-tags ruleset,
+# which admins bypass. --dry-run runs every check and shows the bump without
+# committing, tagging, or pushing.
 #
 # Needs git, go, and gh.
+#
+# @spec: test-and-release#release-bumps-version
 set -eu
 
-die() { echo "release: $*" >&2; exit 1; }
+die() { echo "prepare-release: $*" >&2; exit 1; }
 usage() { echo "usage: $0 [--dry-run] [major|minor|patch]" >&2; exit 2; }
 
 dry_run=""
@@ -30,9 +35,10 @@ for cmd in git go gh; do
   command -v "$cmd" >/dev/null 2>&1 || die "$cmd is not installed"
 done
 
-# The release workflow refuses a tag that is not on main, and the bump commit
-# must fast-forward main, so the release starts from a clean checkout of
-# main's tip.
+# The release workflow refuses a tag whose commit is not a version bump on
+# top of main, and finish-release.sh can only fast-forward main to it while
+# main has not moved, so the release starts from a clean checkout of main's
+# tip.
 git fetch -q --tags origin main
 sha=$(git rev-parse origin/main)
 short=$(git rev-parse --short "$sha")
@@ -41,7 +47,8 @@ short=$(git rev-parse --short "$sha")
 [ -z "$(git status --porcelain)" ] || die "the working tree has uncommitted changes"
 
 # The bump commit changes only versions, so CI on the commit it sits on
-# stands in for CI on the release; the release workflow runs the tests again.
+# stands in for CI on the release; the release workflow runs the tests again,
+# and pushing the release branch runs CI on the release commit.
 ci=$(gh run list --workflow ci.yml --commit "$sha" --limit 1 --json status,conclusion \
   --jq '.[0] | "\(.status)/\(.conclusion)"')
 [ "$ci" = "completed/success" ] || die "CI on $short is not green (${ci:-no run found})"
@@ -58,15 +65,20 @@ if ! tag=$(go run ./cmd/release-check -bump "$kind"); then
   die "could not bump the manifests"
 fi
 version=${tag#v}
+branch="release/$tag"
 
 if git rev-parse -q --verify "refs/tags/$tag" >/dev/null ||
   git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
   git checkout -q -- .
   die "$tag already exists"
 fi
+if git ls-remote --exit-code --heads origin "refs/heads/$branch" >/dev/null 2>&1; then
+  git checkout -q -- .
+  die "$branch already exists on origin"
+fi
 
 message="Version bump to $version"
-echo "Bump $short to $tag and tag it \"$message\":"
+echo "Bump $short to $tag on $branch and tag it \"$message\":"
 git --no-pager diff --stat
 echo
 
@@ -76,7 +88,7 @@ if [ -n "$dry_run" ]; then
   exit 0
 fi
 
-printf 'Push the bump and %s to main and start the release? [y/N] ' "$tag"
+printf 'Push %s and %s and start the release? [y/N] ' "$branch" "$tag"
 read -r answer </dev/tty
 case $answer in
   y | Y | yes) ;;
@@ -87,18 +99,26 @@ case $answer in
 esac
 
 # Undoes everything after the bump, so a failed release leaves the checkout
-# where it started and a rerun passes the clean-checkout checks.
+# on main where it started and a rerun passes the clean-checkout checks.
 undo() {
   git tag -d "$tag" >/dev/null 2>&1 || true
+  git checkout -q -f main
   git reset -q --hard "$sha"
+  git branch -q -D "$branch" >/dev/null 2>&1 || true
   die "$1; reverted the bump"
 }
 
 # A hook or a signing failure can stop the commit or the tag.
+git switch -q -c "$branch" || undo "could not create $branch"
 git commit -q -am "$message" || undo "could not commit the bump"
 git tag -a "$tag" -m "$message" || undo "could not create $tag"
-# Atomic, so main never carries a bump without its tag or the reverse.
-git push --atomic origin HEAD:refs/heads/main "refs/tags/$tag" || undo "push failed"
+# Atomic, so the tag never exists without its branch or the reverse.
+git push --atomic origin "refs/heads/$branch" "refs/tags/$tag" || undo "push failed"
+
+# The branch and the tag are published and the release workflow has started,
+# so nothing below undoes them.
+git switch -q main
+git branch -q -D "$branch"
 
 # The run takes a few seconds to appear after the push.
 run=""
@@ -111,4 +131,5 @@ done
 [ -n "$run" ] || die "pushed $tag, but no release run appeared; check the Actions tab"
 gh run watch "$run" --exit-status || die "the release workflow failed: $(gh run view "$run" --json url --jq .url)"
 
-echo "Released $tag. Approve and merge the \"Pin the marketplace to $tag\" pull request."
+pr=$(gh pr list --head "$branch" --base main --state open --json url --jq '.[0].url // empty')
+echo "Released $tag${pr:+ and opened $pr}. When CI on it passes, run: scripts/finish-release.sh $tag"

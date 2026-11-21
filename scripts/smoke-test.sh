@@ -10,7 +10,8 @@
 #                        run an agent built from it (pull requests).
 #   SMOKE_RELEASE_TAG=vX.Y.Z
 #                        the plugin comes from GitHub at that tag through the
-#                        marketplace's own git-subdir source, and the launcher
+#                        tagged commit's marketplace, already pinned to the
+#                        tag, and its own git-subdir source, and the launcher
 #                        downloads and verifies the binary attached to the
 #                        release, the way a fleet install does (release
 #                        workflow, after publish).
@@ -19,7 +20,7 @@
 # stops after install and enrollment (no API call).
 #
 # @spec: test-and-release#install-smoke-test
-# @spec: test-and-release#fleet-install-before-pin
+# @spec: test-and-release#fleet-install-before-rollout
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -58,11 +59,11 @@ unset NEO_TAX_AGENT_BIN
 market="$tmp/marketplace"
 mkdir -p "$market/.claude-plugin"
 if [ -n "$tag" ]; then
-  # The marketplace as the pin will write it: the same git-subdir source on
-  # GitHub, at this tag.
-  jq --arg ref "$tag" --arg v "${tag#v}" \
-    '.metadata.version = $v | .plugins[0].source.ref = $ref | .plugins[0].version = $v' \
-    "$repo/.claude-plugin/marketplace.json" >"$market/.claude-plugin/marketplace.json"
+  # The marketplace exactly as main will carry it once the release is
+  # rolled out: the tagged commit's own, pinned to this tag.
+  [ "$(jq -r '.plugins[0].source.ref' "$repo/.claude-plugin/marketplace.json")" = "$tag" ] ||
+    fail "the checked-out marketplace is not pinned to $tag"
+  cp "$repo/.claude-plugin/marketplace.json" "$market/.claude-plugin/marketplace.json"
 else
   # The plugin source is this working tree, and the hooks run an agent built
   # from it.
