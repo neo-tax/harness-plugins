@@ -86,14 +86,19 @@ case $answer in
     ;;
 esac
 
-git commit -q -am "$message"
-git tag -a "$tag" -m "$message"
-# Atomic, so main never carries a bump without its tag or the reverse.
-if ! git push --atomic origin HEAD:refs/heads/main "refs/tags/$tag"; then
-  git tag -d "$tag" >/dev/null
+# Undoes everything after the bump, so a failed release leaves the checkout
+# where it started and a rerun passes the clean-checkout checks.
+undo() {
+  git tag -d "$tag" >/dev/null 2>&1 || true
   git reset -q --hard "$sha"
-  die "push failed; deleted the local tag and bump commit"
-fi
+  die "$1; reverted the bump"
+}
+
+# A hook or a signing failure can stop the commit or the tag.
+git commit -q -am "$message" || undo "could not commit the bump"
+git tag -a "$tag" -m "$message" || undo "could not create $tag"
+# Atomic, so main never carries a bump without its tag or the reverse.
+git push --atomic origin HEAD:refs/heads/main "refs/tags/$tag" || undo "push failed"
 
 # The run takes a few seconds to appear after the push.
 run=""
