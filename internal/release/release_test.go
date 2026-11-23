@@ -192,7 +192,7 @@ func TestBump(t *testing.T) {
 	for _, c := range cases {
 		root := repo(t, layout{version: c.from, latest: c.latest})
 		stableBefore, _ := os.ReadFile(filepath.Join(root, ".claude-plugin/marketplace.json"))
-		tag, err := release.Bump(root, c.kind)
+		tag, err := release.Bump(root, c.kind, "")
 		if err != nil || tag != c.want {
 			t.Fatalf("%s %s: got %q, %v; want %q", c.kind, c.from, tag, err, c.want)
 		}
@@ -211,9 +211,35 @@ func TestBump(t *testing.T) {
 		{"prerelease", "patch", "0.1.0-rc.1", "not a stable version"},
 		{"v0 to v1 without latest channel", "major", "0.9.0", "is missing"},
 	} {
-		_, err := release.Bump(repo(t, layout{version: c.from}), c.kind)
+		_, err := release.Bump(repo(t, layout{version: c.from}), c.kind, "")
 		if err == nil || !strings.Contains(err.Error(), c.wantErr) {
 			t.Errorf("%s: err %v, want %q", c.name, err, c.wantErr)
+		}
+	}
+}
+
+// A release that was published but never rolled out leaves main a version
+// behind its tag; the next bump starts from the tag, so it does not land on
+// the abandoned version again. An older or equal tag changes nothing.
+// @spec: test-and-release#release-bumps-version
+func TestBumpStartsFromNewestTag(t *testing.T) {
+	for _, c := range []struct{ kind, from, latest, want, wantErr string }{
+		{"patch", "0.1.1", "v0.1.2", "v0.1.3", ""},
+		{"minor", "0.1.1", "v0.1.2", "v0.2.0", ""},
+		{"patch", "0.1.1", "v0.1.1", "v0.1.2", ""},
+		{"patch", "0.1.1", "v0.1.0", "v0.1.2", ""},
+		{"patch", "0.1.1", "v0.1", "", "not a semantic-version tag"},
+	} {
+		root := repo(t, layout{version: c.from})
+		tag, err := release.Bump(root, c.kind, c.latest)
+		if c.wantErr != "" {
+			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+				t.Errorf("%s from %s, latest %s: err %v, want %q", c.kind, c.from, c.latest, err, c.wantErr)
+			}
+			continue
+		}
+		if err != nil || tag != c.want {
+			t.Errorf("%s from %s, latest %s: got %q, %v; want %q", c.kind, c.from, c.latest, tag, err, c.want)
 		}
 	}
 }

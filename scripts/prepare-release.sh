@@ -6,6 +6,10 @@
 # the release pull request. scripts/finish-release.sh then fast-forwards main
 # to the commit, which is what rolls the release out.
 #
+# The bump starts from the newest v* tag when it is ahead of main, and the
+# pull requests of earlier releases that can no longer be finished, because
+# main moved before they were, are closed as superseded.
+#
 #   scripts/prepare-release.sh [--dry-run] [major|minor|patch]
 #
 # Asks for the release type when it is not given. Only an organization admin
@@ -38,12 +42,15 @@ done
 # The release workflow refuses a tag whose commit is not a version bump on
 # top of main, and finish-release.sh can only fast-forward main to it while
 # main has not moved, so the release starts from a clean checkout of main's
-# tip.
+# tip. It must be the main branch itself: a failure after the commit resets
+# main and returns to it.
 git fetch -q --tags origin main
 sha=$(git rev-parse origin/main)
 short=$(git rev-parse --short "$sha")
+[ "$(git symbolic-ref -q --short HEAD)" = main ] ||
+  die "not on the main branch; run: git switch main && git pull --ff-only"
 [ "$(git rev-parse HEAD)" = "$sha" ] ||
-  die "HEAD is not origin/main ($short); run: git switch main && git pull --ff-only"
+  die "main is not origin/main ($short); run: git pull --ff-only"
 [ -z "$(git status --porcelain)" ] || die "the working tree has uncommitted changes"
 
 # The bump commit changes only versions, so CI on the commit it sits on
@@ -53,14 +60,29 @@ ci=$(gh run list --workflow ci.yml --commit "$sha" --limit 1 --json status,concl
   --jq '.[0] | "\(.status)/\(.conclusion)"')
 [ "$ci" = "completed/success" ] || die "CI on $short is not green (${ci:-no run found})"
 
+# An open release pull request whose commit sits on main's tip can still be
+# finished, and a second release would compete with it. One whose commit
+# does not can never be fast-forwarded; this release supersedes it.
+superseded=""
+for head in $(gh pr list --base main --state open --json headRefName \
+  --jq '.[].headRefName | select(startswith("release/v"))'); do
+  prev=${head#release/}
+  if commit=$(git rev-parse -q --verify "refs/tags/$prev^{commit}") &&
+    [ "$(git rev-parse "$commit^")" = "$sha" ]; then
+    die "$prev can still be finished: run scripts/finish-release.sh $prev, or close its pull request to abandon it"
+  fi
+  superseded="$superseded $head"
+done
+
+latest=$(git tag -l 'v*' --sort=-v:refname | head -n 1)
 if [ -z "$kind" ]; then
-  echo "The previous release was $(git tag -l 'v*' --sort=-v:refname | head -n 1)."
+  echo "The previous release was ${latest:-none}."
   printf 'What type of release is this: major, minor, or patch? '
   read -r kind </dev/tty
 fi
 case $kind in major | minor | patch) ;; *) usage ;; esac
 
-if ! tag=$(go run ./cmd/release-check -bump "$kind"); then
+if ! tag=$(go run ./cmd/release-check -bump -latest "$latest" "$kind"); then
   git checkout -q -- .
   die "could not bump the manifests"
 fi
@@ -80,6 +102,9 @@ fi
 message="Version bump to $version"
 echo "Bump $short to $tag on $branch and tag it \"$message\":"
 git --no-pager diff --stat
+for head in $superseded; do
+  echo "Supersedes ${head#release/}: its pull request will be closed and $head deleted."
+done
 echo
 
 if [ -n "$dry_run" ]; then
@@ -119,6 +144,14 @@ git push --atomic origin "refs/heads/$branch" "refs/tags/$tag" || undo "push fai
 # so nothing below undoes them.
 git switch -q main
 git branch -q -D "$branch"
+
+# A superseded release keeps its tag and its GitHub release, which nothing
+# points at.
+for head in $superseded; do
+  gh pr close "$head" --delete-branch \
+    --comment "Superseded by $tag: main moved before ${head#release/} was finished, so it can no longer be fast-forwarded." >/dev/null ||
+    echo "prepare-release: could not close the pull request for $head; close it by hand" >&2
+done
 
 # The run takes a few seconds to appear after the push.
 run=""

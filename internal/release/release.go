@@ -151,8 +151,13 @@ func checkMarketplace(root, label string, m manifest, version, ref string) []err
 // ref values, keeping each file's layout, refuses plugins whose versions
 // already disagree, and fails if the result does not pass Check.
 //
+// latest is the newest release tag, or empty when there is none. The bump
+// starts from it when it is newer than the manifests, which happens when a
+// release was published but never rolled out: main still carries the version
+// before it, and bumping from that would land on the abandoned tag again.
+//
 // @spec: test-and-release#release-bumps-version
-func Bump(root, kind string) (string, error) {
+func Bump(root, kind, latest string) (string, error) {
 	stable, err := read(filepath.Join(root, stablePath))
 	if err != nil {
 		return "", err
@@ -174,10 +179,19 @@ func Bump(root, kind string) (string, error) {
 	if len(paths) == 0 {
 		return "", fmt.Errorf("%s lists no plugins", stablePath)
 	}
-	m := semver.FindStringSubmatch("v" + current)
-	if m == nil {
+	from := "v" + current
+	if !semver.MatchString(from) {
 		return "", fmt.Errorf("plugin version %q is not a stable version like 1.2.3", current)
 	}
+	if latest != "" {
+		if !semver.MatchString(latest) {
+			return "", fmt.Errorf("latest release %q is not a semantic-version tag like v1.2.3", latest)
+		}
+		if older(from, latest) {
+			from = latest
+		}
+	}
+	m := semver.FindStringSubmatch(from)
 	var n [3]int
 	for i := range n {
 		n[i], _ = strconv.Atoi(m[i+1])

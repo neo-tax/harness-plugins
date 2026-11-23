@@ -41,9 +41,10 @@ fi
 
 # A fast-forward is the only way the tag ends up on main. If main has moved
 # since the release was prepared, this release cannot be rolled out: it stays
-# published but unpinned, and the next release supersedes it.
+# published but unpinned, and the next release, which starts from this tag's
+# version, supersedes it and closes its pull request.
 [ "$(git rev-parse "$sha^")" = "$main" ] ||
-  die "main has moved since $tag was prepared, so it can no longer be fast-forwarded to $short; cut the next release with scripts/prepare-release.sh"
+  die "main has moved since $tag was prepared, so it can no longer be fast-forwarded to $short; cut the next release with scripts/prepare-release.sh, which supersedes $tag"
 
 run=$(gh run list --workflow release.yml --branch "$tag" --limit 1 --json status,conclusion,url \
   --jq '.[0] | "\(.status)/\(.conclusion) \(.url)"')
