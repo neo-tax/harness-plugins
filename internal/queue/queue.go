@@ -203,6 +203,37 @@ func (q *Queue) Size() int64 {
 	return total
 }
 
+// SessionIDs is the set of session ids the queue holds an event for, read
+// without a lock: a segment a flush deletes meanwhile is skipped, and its
+// events count as sent.
+//
+// @spec: session-list#report-status
+func (q *Queue) SessionIDs() map[string]bool {
+	out := map[string]bool{}
+	paths := append(q.sealed(), filepath.Join(q.queueDir(), activeName))
+	for _, p := range paths {
+		f, err := os.Open(p)
+		if err != nil {
+			continue
+		}
+		r := bufio.NewReaderSize(f, 64<<10)
+		for {
+			raw, err := r.ReadBytes('\n')
+			var ev struct {
+				SessionID string `json:"session_id"`
+			}
+			if len(raw) > 0 && json.Unmarshal(raw, &ev) == nil && ev.SessionID != "" {
+				out[ev.SessionID] = true
+			}
+			if err != nil {
+				break
+			}
+		}
+		f.Close()
+	}
+	return out
+}
+
 // enforceCap deletes the oldest sealed segments while the queue exceeds its
 // cap, counting the unsent events it discards.
 //

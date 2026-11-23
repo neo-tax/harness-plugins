@@ -20,6 +20,8 @@ This page is written for engineers and IT or security admins evaluating the plug
 | Session id, timestamps, and Claude Code version | Session titles |
 | A random device id | |
 
+To match a session id in Neo.Tax to a conversation you remember, run `/neo-tax:sessions`. It lists your recent sessions with their titles and whether each was sent. The titles are read and shown on your machine only.
+
 At login, the engineer confirms their email, and the plugin sends it once along with the machine's hostname, OS, and CPU architecture. That email is stored with the device's key on Neo.Tax's side. It is not attached to each event.
 
 **[PRIVACY.md](PRIVACY.md) is the complete list**, field by field. It's generated from the allowlist built into the plugin: any field not on it is removed on the engineer's machine before it's written to disk or sent. A test fails if the published list and the code ever disagree.

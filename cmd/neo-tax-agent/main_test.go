@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -96,5 +98,37 @@ func TestLoginTakesTheTokenOnlyFromStdin(t *testing.T) {
 	}
 	if _, err := enroll.Load(dir); err == nil {
 		t.Fatal("enrolled without a token")
+	}
+}
+
+// @spec: session-list#sessions-command
+func TestSessionsCommand(t *testing.T) {
+	config, data := t.TempDir(), t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	proj := filepath.Join(config, "projects", "-p")
+	os.MkdirAll(proj, 0o700)
+	id := "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+	os.WriteFile(filepath.Join(proj, id+".jsonl"), []byte(`{"type":"user","timestamp":"2026-11-20T09:00:00Z","gitBranch":"feat-x","message":{"content":"hi"}}
+{"type":"ai-title","aiTitle":"Fix the\tthing","sessionId":"`+id+`"}
+`), 0o600)
+	var out, errOut bytes.Buffer
+	if code := run([]string{"sessions", "--data-dir", data}, nil, &out, &errOut); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "LAST ACTIVE") {
+		t.Fatalf("output %q", out.String())
+	}
+	if f := strings.Fields(lines[1]); len(f) < 7 || f[2] != id || f[3] != "unread" || f[4] != "feat-x" || strings.Join(f[5:], " ") != "Fix the thing" {
+		t.Errorf("row %q", lines[1])
+	}
+	if code := run([]string{"sessions", "--limit", "-1"}, nil, &out, &errOut); code != 2 {
+		t.Errorf("--limit -1 exit %d", code)
+	}
+	os.RemoveAll(proj)
+	out.Reset()
+	run([]string{"sessions", "--data-dir", data}, nil, &out, &errOut)
+	if !strings.Contains(out.String(), "No Claude Code sessions") {
+		t.Errorf("empty output %q", out.String())
 	}
 }
