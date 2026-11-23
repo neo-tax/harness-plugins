@@ -28,7 +28,8 @@ for cmd in git gh; do
 done
 
 git fetch -q --tags origin main
-tag=${1:-$(git tag -l 'v*' --sort=-v:refname | head -n 1)}
+# Only vX.Y.Z tags are releases; version sort orders v1.0.0-rc.1 after v1.0.0.
+tag=${1:-$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)}
 [ -n "$tag" ] || die "no v* tag found"
 sha=$(git rev-parse -q --verify "refs/tags/$tag^{commit}") || die "$tag does not exist"
 short=$(git rev-parse --short "$sha")

@@ -74,7 +74,10 @@ for head in $(gh pr list --base main --state open --json headRefName \
   superseded="$superseded $head"
 done
 
-latest=$(git tag -l 'v*' --sort=-v:refname | head -n 1)
+# Only vX.Y.Z tags are releases; any other v* tag, such as a pre-release,
+# would make the bump refuse it, and version sort orders v1.0.0-rc.1 after
+# v1.0.0.
+latest=$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)
 if [ -z "$kind" ]; then
   echo "The previous release was ${latest:-none}."
   printf 'What type of release is this: major, minor, or patch? '
