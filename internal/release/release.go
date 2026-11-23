@@ -1,13 +1,15 @@
-// Package release bumps the plugin manifests to the next version, checks,
-// before a tag is published, that they agree with the tag, and pins the
-// stable marketplace to the tag once its release is published.
+// Package release bumps the plugin manifests to the next version, pinning
+// the stable marketplace to its tag, and checks, before a tag is published,
+// that they agree with the tag.
 //
-// Release procedure: bump plugins/*/.claude-plugin/plugin.json to the new
-// version on main, push the tag, and the release workflow checks, builds,
-// publishes, and only then opens a pull request that pins
-// .claude-plugin/marketplace.json to the tag on main. Until that pull request
-// merges the marketplace keeps pointing at the previous release, so no
-// engineer is ever pointed at a tag whose binaries are not attached yet.
+// Release procedure: one commit on a release branch off main bumps every
+// plugins/*/.claude-plugin/plugin.json and pins
+// .claude-plugin/marketplace.json to the new tag, and that commit is tagged.
+// The release workflow checks, builds, publishes, and installs the release
+// from the tag; only then is main fast-forwarded to the commit. Engineers
+// read the marketplace from main, so until the fast-forward they stay on the
+// previous release and are never pointed at a tag whose binaries are not
+// attached yet.
 package release
 
 import (
@@ -74,10 +76,9 @@ func parse(tag string) (version string, major int, err error) {
 
 // Check returns an error naming every manifest that disagrees with tag:
 // each plugin's plugin.json must carry the tag's version, each marketplace
-// must take its plugins from this repository, and v0 publishes only the
-// stable marketplace while v1 and later also publish a latest channel that
-// follows main. The stable marketplace's ref is not checked here; Pin sets it
-// after the release is published.
+// must take its plugins from this repository, the stable marketplace must be
+// pinned to the tag, and v0 publishes only the stable marketplace while v1
+// and later also publish a latest channel that follows main.
 //
 // @spec: test-and-release#manifest-version-matches-tag
 // @spec: test-and-release#single-channel-v0-1
@@ -91,7 +92,7 @@ func Check(root, tag string) error {
 	if err != nil {
 		return err
 	}
-	errs := checkMarketplace(root, "marketplace", stable, version, "", false)
+	errs := checkMarketplace(root, "marketplace", stable, version, tag)
 
 	latest, err := read(filepath.Join(root, latestPath))
 	switch {
@@ -104,24 +105,23 @@ func Check(root, tag string) error {
 	case major == 0:
 		errs = append(errs, fmt.Errorf("v0 publishes a single channel; remove %s", latestPath))
 	default:
-		errs = append(errs, checkMarketplace(root, "latest channel", latest, version, "main", true)...)
+		errs = append(errs, checkMarketplace(root, "latest channel", latest, version, "main")...)
 	}
 	return errors.Join(errs...)
 }
 
-// checkMarketplace checks a marketplace's plugin sources; ref, when set, is
-// the ref each source must name, and versions says whether the marketplace's
-// own versions must already match (the stable one's are set by Pin).
-func checkMarketplace(root, label string, m manifest, version, ref string, versions bool) []error {
+// checkMarketplace checks a marketplace's versions and plugin sources; ref is
+// the ref each source must name.
+func checkMarketplace(root, label string, m manifest, version, ref string) []error {
 	var errs []error
 	if len(m.Plugins) == 0 {
 		errs = append(errs, fmt.Errorf("%s lists no plugins", label))
 	}
-	if versions && m.Metadata.Version != version {
+	if m.Metadata.Version != version {
 		errs = append(errs, fmt.Errorf("%s metadata version %q, want %q", label, m.Metadata.Version, version))
 	}
 	for _, p := range m.Plugins {
-		if versions && p.Version != version {
+		if p.Version != version {
 			errs = append(errs, fmt.Errorf("%s plugin %s version %q, want %q", label, p.Name, p.Version, version))
 		}
 		s := p.Source
@@ -129,7 +129,7 @@ func checkMarketplace(root, label string, m manifest, version, ref string, versi
 			errs = append(errs, fmt.Errorf("%s plugin %s source must be git-subdir of %s", label, p.Name, Repository))
 			continue
 		}
-		if ref != "" && s.Ref != ref {
+		if s.Ref != ref {
 			errs = append(errs, fmt.Errorf("%s plugin %s source ref %q, want %q", label, p.Name, s.Ref, ref))
 		}
 		pm, err := read(filepath.Join(root, s.Path, ".claude-plugin", "plugin.json"))
@@ -146,13 +146,18 @@ func checkMarketplace(root, label string, m manifest, version, ref string, versi
 
 // Bump moves every released manifest to the next major, minor, or patch
 // version and returns the new tag: each plugin.json the stable marketplace
-// lists, and, when it exists, the latest channel's metadata and plugin
-// versions. The stable marketplace is left to Pin. It edits only version
-// values, keeping each file's layout, refuses plugins whose versions already
-// disagree, and fails if the result does not pass Check.
+// lists, when it exists the latest channel's metadata and plugin versions,
+// and, through Pin, the stable marketplace itself. It edits only version and
+// ref values, keeping each file's layout, refuses plugins whose versions
+// already disagree, and fails if the result does not pass Check.
+//
+// latest is the newest release tag, or empty when there is none. The bump
+// starts from it when it is newer than the manifests, which happens when a
+// release was published but never rolled out: main still carries the version
+// before it, and bumping from that would land on the abandoned tag again.
 //
 // @spec: test-and-release#release-bumps-version
-func Bump(root, kind string) (string, error) {
+func Bump(root, kind, latest string) (string, error) {
 	stable, err := read(filepath.Join(root, stablePath))
 	if err != nil {
 		return "", err
@@ -174,10 +179,19 @@ func Bump(root, kind string) (string, error) {
 	if len(paths) == 0 {
 		return "", fmt.Errorf("%s lists no plugins", stablePath)
 	}
-	m := semver.FindStringSubmatch("v" + current)
-	if m == nil {
+	from := "v" + current
+	if !semver.MatchString(from) {
 		return "", fmt.Errorf("plugin version %q is not a stable version like 1.2.3", current)
 	}
+	if latest != "" {
+		if !semver.MatchString(latest) {
+			return "", fmt.Errorf("latest release %q is not a semantic-version tag like v1.2.3", latest)
+		}
+		if older(from, latest) {
+			from = latest
+		}
+	}
+	m := semver.FindStringSubmatch(from)
 	var n [3]int
 	for i := range n {
 		n[i], _ = strconv.Atoi(m[i+1])
@@ -206,6 +220,9 @@ func Bump(root, kind string) (string, error) {
 		if err := os.WriteFile(path, versionField.ReplaceAll(b, []byte(`${1}"`+version+`"`)), 0o644); err != nil {
 			return "", err
 		}
+	}
+	if err := Pin(root, tag); err != nil {
+		return "", err
 	}
 	return tag, Check(root, tag)
 }

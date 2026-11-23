@@ -2,7 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # A release pull request is opened with the workflow token, which starts
+    # no workflow, so its required checks come from the admin's push of the
+    # release branch.
+    # @spec: test-and-release#release-pull-request-by-workflow
+    branches: [main, 'release/**']
   pull_request:
 
 # @spec: test-and-release#workflow-token-least-privilege
