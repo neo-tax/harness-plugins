@@ -78,13 +78,18 @@ Add this to your Claude Code [managed settings](https://docs.claude.com/en/docs/
 ```json
 {
   "extraKnownMarketplaces": {
-    "neo-tax-plugins": { "source": { "source": "github", "repo": "neo-tax/harness-plugins" } }
+    "neo-tax-plugins": {
+      "autoUpdate": true,
+      "source": { "source": "github", "repo": "neo-tax/harness-plugins" }
+    }
   },
   "enabledPlugins": { "neo-tax@neo-tax-plugins": true }
 }
 ```
 
 Each engineer still runs `/neo-tax:login` once per machine. Nothing is sent from a machine that hasn't enrolled.
+
+[`deploy/claude-code/README.md`](deploy/claude-code/README.md) covers where to put managed settings (the Claude admin console or device management), what engineers see, and what to check before rolling out.
 
 ### Optional: Claude Code's own telemetry
 
