@@ -42,13 +42,13 @@ The code that runs on an engineer's machine to observe AI coding sessions and re
 
 **Enrollment token**: A short-lived token an admin mints and circulates so that devices can enroll; it can do nothing but enroll.
 
-**Telemetry**: The OpenTelemetry logs and metrics a source sends straight to Neo.Tax's OTLP endpoint without passing through the agent, such as a harness's own export or a gateway's; Claude Code reports each API call as a `claude_code.api_request` record. _Avoid_: session event (that is the agent's), OTel data
+**Telemetry**: The OpenTelemetry logs, metrics, and traces a source sends straight to Neo.Tax's OTLP endpoint without passing through the agent, such as a harness's own export or a gateway's; Claude Code reports each API call as a `claude_code.api_request` record, and Office Agents as an `agent.stream` span. _Avoid_: session event (that is the agent's), OTel data
 
 **Exporter**: The OpenTelemetry component in a harness, gateway, or collector that sends telemetry over OTLP, configured by environment variables or managed settings rather than by the agent. _Avoid_: agent (that is Neo.Tax's binary), shipper
 
 **Gateway**: A proxy between a harness and the model provider that relays API calls and can export telemetry of its own about them (Kong's AI Gateway, OpenRouter). _Avoid_: router, LLM proxy
 
-**Source**: One kind of sender to the OTLP endpoint (Claude Code's own export, a gateway, or a customer's OpenTelemetry Collector), with its own mapping and its own ingest keys. _Avoid_: provider (that is the model provider), integration
+**Source**: One kind of sender to the OTLP endpoint (Claude Code's own export, including Cowork's, which runs Claude Code; Office Agents' export; a gateway; or a customer's OpenTelemetry Collector), with its own mapping and its own ingest keys. _Avoid_: provider (that is the model provider), integration
 
 **Mapping**: A source's rules for turning its telemetry's attribute names into the session record; the attributes a mapping names are the only ones the OTLP endpoint keeps. _Avoid_: parser (that is the adapter's, for transcripts), schema
 
