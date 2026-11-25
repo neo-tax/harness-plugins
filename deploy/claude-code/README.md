@@ -82,7 +82,7 @@ The settings above cover Claude Code only. Cowork exports its own telemetry, whi
 | OTLP headers | `Authorization=Bearer REPLACE_WITH_INGEST_KEY` |
 | Resource attributes | leave empty |
 
-Cowork uses Claude Code's telemetry schema, so it uses the same ingest key and endpoint. The console adds the endpoint's domain to Cowork's network egress allowlist automatically. Export needs Claude desktop 1.1.4173 or later.
+Cowork is essentially a wrapper around Claude Code: it runs Claude Code through the Claude Agent SDK. So its telemetry is Claude Code's own export, with the same events and attributes, kept by Neo.Tax as [PRIVACY.md](../../PRIVACY.md#claude-codes-own-telemetry) describes. The form has no setting to turn on content logging, so prompts and tool details stay redacted, as they are under the managed settings above. It also uses the same ingest key and endpoint. The console adds the endpoint's domain to Cowork's network egress allowlist automatically. Export needs Claude desktop 1.1.4173 or later.
 
 Like Claude Code's telemetry, Cowork's carries the email of the engineer's Claude account. The plugin and `/neo-tax:login` aren't involved: nothing needs to be installed or enrolled on engineers' machines for it.
 

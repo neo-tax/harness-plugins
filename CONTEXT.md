@@ -48,7 +48,7 @@ The code that runs on an engineer's machine to observe AI coding sessions and re
 
 **Gateway**: A proxy between a harness and the model provider that relays API calls and can export telemetry of its own about them (Kong's AI Gateway, OpenRouter). _Avoid_: router, LLM proxy
 
-**Source**: One kind of sender to the OTLP endpoint (Claude Code's own export, Office Agents' export, a gateway, or a customer's OpenTelemetry Collector), with its own mapping and its own ingest keys. _Avoid_: provider (that is the model provider), integration
+**Source**: One kind of sender to the OTLP endpoint (Claude Code's own export, including Cowork's, which runs Claude Code; Office Agents' export; a gateway; or a customer's OpenTelemetry Collector), with its own mapping and its own ingest keys. _Avoid_: provider (that is the model provider), integration
 
 **Mapping**: A source's rules for turning its telemetry's attribute names into the session record; the attributes a mapping names are the only ones the OTLP endpoint keeps. _Avoid_: parser (that is the adapter's, for transcripts), schema
 
