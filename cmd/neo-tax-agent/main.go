@@ -187,7 +187,7 @@ func login(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "neo-tax-agent: could not start the backfill; run neo-tax:backfill:", err)
 		return 0
 	}
-	fmt.Fprintln(stdout, "Sending your existing Claude Code sessions in the background.")
+	fmt.Fprintln(stdout, "Sending Neo.Tax the usage metadata of your past Claude Code sessions in the background. "+neverSent)
 	return 0
 }
 
@@ -195,7 +195,12 @@ func login(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 // also sends their past sessions, which the backfill after login does.
 //
 // @spec: device-enrollment#backfill-disclosed-before-enrolling
-const backfillNotice = "Enrolling also sends Neo.Tax the metadata of every Claude Code session already on this machine, from every project: when each ran, its models and token counts, its repository, branches, and commit, and the pull requests it linked. Prompts, responses, code, and file paths are never sent."
+const backfillNotice = "Enrolling also sends Neo.Tax the metadata of every Claude Code session already on this machine, from every project: when each ran, its models and token counts, its repository, branches, and commit, and the pull requests it linked. " + neverSent
+
+// neverSent closes every message that says session metadata is being sent,
+// so an engineer never reads "sending your sessions" as sending their
+// conversations.
+const neverSent = "Prompts, responses, code, and file paths are never sent."
 
 // openURL opens the login form in the engineer's browser.
 var openURL = enroll.OpenBrowser
@@ -279,7 +284,7 @@ func backfill(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "neo-tax-agent: could not start the backfill:", err)
 			return 1
 		}
-		fmt.Fprintln(stdout, "Started resending your Claude Code sessions in the background.")
+		fmt.Fprintln(stdout, "Started sending Neo.Tax the usage metadata of your Claude Code sessions in the background. "+neverSent)
 		return 0
 	}
 	err := claudecode.Backfill(context.Background(), claudecode.BackfillOptions{DataDir: d, AgentVersion: Version, Out: stdout, Restart: *restart})
